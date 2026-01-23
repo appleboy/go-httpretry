@@ -719,3 +719,155 @@ func TestTLSConnection_WithSelfSignedCert(t *testing.T) {
 	t.Logf("Request result: %v (cert format affects outcome)", err)
 	_ = certPEM // Placeholder for proper PEM usage
 }
+
+func TestWithInsecureSkipVerify_DefaultClient(t *testing.T) {
+	client, err := NewClient(
+		WithInsecureSkipVerify(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have insecureSkipVerify set to true
+	if !client.insecureSkipVerify {
+		t.Error("expected insecureSkipVerify to be true")
+	}
+
+	// Should have created a custom transport with InsecureSkipVerify enabled
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected transport to be *http.Transport")
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("expected TLS config to be set")
+	}
+	if !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Error("expected TLS InsecureSkipVerify to be true")
+	}
+}
+
+func TestWithInsecureSkipVerify_WithCustomClient(t *testing.T) {
+	customHTTPClient := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns: 100,
+		},
+	}
+
+	client, err := NewClient(
+		WithHTTPClient(customHTTPClient),
+		WithInsecureSkipVerify(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should use the same HTTP client instance
+	if client.httpClient != customHTTPClient {
+		t.Error("expected same httpClient instance")
+	}
+
+	// Should have modified the transport
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected transport to be *http.Transport")
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("expected TLS config to be set")
+	}
+	if !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Error("expected TLS InsecureSkipVerify to be true")
+	}
+	// Should preserve existing transport settings
+	if transport.MaxIdleConns != 100 {
+		t.Error("expected existing transport settings to be preserved")
+	}
+}
+
+func TestWithInsecureSkipVerify_WithCerts(t *testing.T) {
+	// Read valid certificate from test file
+	validPEM, err := os.ReadFile("testdata/test-cert.pem")
+	if err != nil {
+		t.Fatalf("failed to read test certificate: %v", err)
+	}
+
+	client, err := NewClient(
+		WithCertFromBytes(validPEM),
+		WithInsecureSkipVerify(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have both custom certs and InsecureSkipVerify enabled
+	if len(client.customCertsPEM) != 1 {
+		t.Errorf("expected 1 custom cert, got %d", len(client.customCertsPEM))
+	}
+	if !client.insecureSkipVerify {
+		t.Error("expected insecureSkipVerify to be true")
+	}
+
+	transport, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected transport to be *http.Transport")
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("expected TLS config to be set")
+	}
+	if transport.TLSClientConfig.RootCAs == nil {
+		t.Error("expected RootCAs to be set")
+	}
+	if !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Error("expected TLS InsecureSkipVerify to be true")
+	}
+}
+
+func TestWithInsecureSkipVerify_RealTLSConnection(t *testing.T) {
+	// Create TLS server with self-signed certificate
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("secure response"))
+	}))
+	defer server.Close()
+
+	// Without InsecureSkipVerify, connection should fail
+	clientNoSkip, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req1, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp1, err := clientNoSkip.Do(ctx, req1)
+	if err == nil {
+		resp1.Body.Close()
+		t.Log("Warning: Expected TLS verification error, but request succeeded")
+	}
+
+	// With InsecureSkipVerify, connection should succeed
+	clientWithSkip, err := NewClient(
+		WithInsecureSkipVerify(),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client with skip verify: %v", err)
+	}
+
+	req2, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp2, err := clientWithSkip.Do(ctx, req2)
+	if err != nil {
+		t.Fatalf("expected successful connection with InsecureSkipVerify, got error: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp2.StatusCode)
+	}
+}

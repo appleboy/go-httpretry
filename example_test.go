@@ -389,3 +389,37 @@ func Example_withCertAndCustomHTTPClient() {
 
 	fmt.Printf("Connected with custom client and certs: %d\n", resp.StatusCode)
 }
+
+// Example_withInsecureSkipVerify demonstrates skipping TLS certificate verification
+// WARNING: This should only be used in testing or development environments
+func Example_withInsecureSkipVerify() {
+	// Skip TLS certificate verification (useful for self-signed certs in testing)
+	// WARNING: This makes the client vulnerable to man-in-the-middle attacks
+	// Only use this in controlled testing/development environments
+	client, err := retry.NewClient(
+		retry.WithInsecureSkipVerify(),
+		retry.WithMaxRetries(3),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"https://localhost:8443/api/data", // Local development server with self-signed cert
+		nil,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Connected (skip verify): %d\n", resp.StatusCode)
+}

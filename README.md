@@ -27,6 +27,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithCertFromFile(certPath string)`](#withcertfromfilecertpath-string)
     - [`WithCertFromBytes(certPEM []byte)`](#withcertfrombytescertpem-byte)
     - [`WithCertFromURL(certURL string)`](#withcertfromurlcerturl-string)
+    - [`WithInsecureSkipVerify()`](#withinsecureskipverify)
   - [Default Retry Behavior](#default-retry-behavior)
   - [Exponential Backoff](#exponential-backoff)
   - [Context Support](#context-support)
@@ -38,6 +39,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Connecting to Internal Services with Custom Certificates](#connecting-to-internal-services-with-custom-certificates)
     - [Multiple Certificate Sources](#multiple-certificate-sources)
     - [Custom HTTP Client with Certificates](#custom-http-client-with-certificates)
+    - [Skip SSL Verification for Testing](#skip-ssl-verification-for-testing)
   - [Testing](#testing)
   - [Design Principles](#design-principles)
 
@@ -50,6 +52,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
 - **Resource Safe**: Automatically closes response bodies before retries to prevent leaks
 - **Enterprise Certificate Support**: Load custom TLS certificates from files, memory, or URLs for internal/self-signed CAs
+- **Flexible TLS Configuration**: Optional SSL verification skipping for testing/development environments
 - **Zero Dependencies**: Uses only Go standard library
 
 ## Installation
@@ -238,6 +241,24 @@ client, err := retry.NewClient(
 
 **Note**: Custom certificates are merged with the system certificate pool, allowing connections to both public and internal services. Certificates work seamlessly with both default and custom HTTP clients.
 
+### `WithInsecureSkipVerify()`
+
+Disables TLS certificate verification. **WARNING**: This makes the client vulnerable to man-in-the-middle attacks and should only be used in testing or development environments.
+
+```go
+client, err := retry.NewClient(
+    retry.WithInsecureSkipVerify(),
+)
+```
+
+**Security Notice**: Only use this option in controlled environments such as:
+
+- Local development with self-signed certificates
+- Testing environments
+- CI/CD pipelines
+
+For production environments with self-signed certificates, prefer using `WithCertFromFile`, `WithCertFromBytes`, or `WithCertFromURL` to explicitly trust specific certificates.
+
 ## Default Retry Behavior
 
 The `DefaultRetryableChecker` retries in the following cases:
@@ -407,6 +428,33 @@ client, err := retry.NewClient(
     retry.WithMaxRetries(3),
 )
 ```
+
+### Skip SSL Verification for Testing
+
+For testing or development environments, you can skip SSL certificate verification:
+
+```go
+// WARNING: Only use this in testing/development environments!
+// This makes your client vulnerable to man-in-the-middle attacks
+client, err := retry.NewClient(
+    retry.WithInsecureSkipVerify(),
+    retry.WithMaxRetries(3),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Connect to a server with self-signed certificate
+ctx := context.Background()
+req, _ := http.NewRequest(http.MethodGet, "https://localhost:8443/api/data", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+**Important Security Note**: Never use `WithInsecureSkipVerify()` in production. For production environments with self-signed certificates, use `WithCertFromFile()`, `WithCertFromBytes()`, or `WithCertFromURL()` to explicitly trust specific certificates.
 
 For more details on certificate usage, see [CERT_USAGE.md](CERT_USAGE.md).
 

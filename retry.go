@@ -28,6 +28,7 @@ type Client struct {
 	httpClient         *http.Client
 	retryableChecker   RetryableChecker
 	customCertsPEM     [][]byte // Store PEM bytes to merge with system certs later
+	insecureSkipVerify bool     // Skip TLS certificate verification
 	err                error
 }
 
@@ -88,6 +89,15 @@ func WithRetryableChecker(checker RetryableChecker) Option {
 		if checker != nil {
 			c.retryableChecker = checker
 		}
+	}
+}
+
+// WithInsecureSkipVerify disables TLS certificate verification.
+// WARNING: This makes the client vulnerable to man-in-the-middle attacks.
+// Only use this for testing or development environments.
+func WithInsecureSkipVerify() Option {
+	return func(c *Client) {
+		c.insecureSkipVerify = true
 	}
 }
 
@@ -215,23 +225,31 @@ func NewClient(opts ...Option) (*Client, error) {
 		return nil, c.err
 	}
 
-	// Apply custom certificates if provided
-	if len(c.customCertsPEM) > 0 {
-		// Start with system cert pool, fall back to empty pool if unavailable
-		rootCAs, err := x509.SystemCertPool()
-		if rootCAs == nil || err != nil {
-			rootCAs = x509.NewCertPool()
+	// Apply custom TLS configuration if needed
+	if len(c.customCertsPEM) > 0 || c.insecureSkipVerify {
+		var rootCAs *x509.CertPool
+
+		// Only set up custom cert pool if certificates are provided
+		if len(c.customCertsPEM) > 0 {
+			// Start with system cert pool, fall back to empty pool if unavailable
+			var err error
+			rootCAs, err = x509.SystemCertPool()
+			if rootCAs == nil || err != nil {
+				rootCAs = x509.NewCertPool()
+			}
+
+			// Add all custom certificates to the system cert pool
+			for _, certPEM := range c.customCertsPEM {
+				rootCAs.AppendCertsFromPEM(certPEM)
+			}
 		}
 
-		// Add all custom certificates to the system cert pool
-		for _, certPEM := range c.customCertsPEM {
-			rootCAs.AppendCertsFromPEM(certPEM)
-		}
-
-		// Create TLS config with combined cert pool
+		// Create TLS config with combined cert pool and InsecureSkipVerify
 		tlsConfig := &tls.Config{
-			RootCAs:    rootCAs,
-			MinVersion: tls.VersionTLS12, // Require TLS 1.2 or higher for security
+			RootCAs: rootCAs,
+			// #nosec G402 - InsecureSkipVerify is intentionally configurable via WithInsecureSkipVerify()
+			InsecureSkipVerify: c.insecureSkipVerify,
+			MinVersion:         tls.VersionTLS12, // Require TLS 1.2 or higher for security
 		}
 
 		// Handle different httpClient scenarios
@@ -253,7 +271,12 @@ func NewClient(opts ...Option) (*Client, error) {
 					newTransport.TLSClientConfig = tlsConfig
 				} else {
 					// Merge with existing TLS config
-					newTransport.TLSClientConfig.RootCAs = rootCAs
+					if len(c.customCertsPEM) > 0 {
+						newTransport.TLSClientConfig.RootCAs = rootCAs
+					}
+					if c.insecureSkipVerify {
+						newTransport.TLSClientConfig.InsecureSkipVerify = true
+					}
 					if newTransport.TLSClientConfig.MinVersion == 0 {
 						newTransport.TLSClientConfig.MinVersion = tls.VersionTLS12
 					}
