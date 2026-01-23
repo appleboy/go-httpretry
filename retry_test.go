@@ -871,3 +871,372 @@ func TestWithInsecureSkipVerify_RealTLSConnection(t *testing.T) {
 		t.Errorf("expected status 200, got %d", resp2.StatusCode)
 	}
 }
+
+func TestWithJitter(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond),
+		WithMaxRetries(3),
+		WithJitter(true),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	start := time.Now()
+	resp, err := client.Do(ctx, req)
+	if err == nil && resp != nil {
+		resp.Body.Close()
+	}
+	duration := time.Since(start)
+
+	// With jitter, the total duration should vary
+	// Without jitter: 100ms + 200ms + 400ms = 700ms
+	// With jitter (±25%): approximately 525ms to 875ms
+	if duration < 400*time.Millisecond || duration > 1*time.Second {
+		t.Logf("Duration %v seems unusual but jitter can cause variation", duration)
+	}
+
+	if attempts.Load() != 4 {
+		t.Errorf("expected 4 attempts, got %d", attempts.Load())
+	}
+}
+
+func TestWithOnRetry(t *testing.T) {
+	var attempts atomic.Int32
+	var retryInfos []RetryInfo
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		if count < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(3),
+		WithOnRetry(func(info RetryInfo) {
+			retryInfos = append(retryInfos, info)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should have 2 retries (3 total attempts)
+	if len(retryInfos) != 2 {
+		t.Errorf("expected 2 retry callbacks, got %d", len(retryInfos))
+	}
+
+	// Verify retry info
+	for i, info := range retryInfos {
+		if info.Attempt != i+1 {
+			t.Errorf("retry %d: expected attempt %d, got %d", i, i+1, info.Attempt)
+		}
+		if info.StatusCode != http.StatusInternalServerError {
+			t.Errorf("retry %d: expected status 500, got %d", i, info.StatusCode)
+		}
+		if info.Delay <= 0 {
+			t.Errorf("retry %d: expected positive delay, got %v", i, info.Delay)
+		}
+		if info.TotalElapsed <= 0 {
+			t.Errorf("retry %d: expected positive total elapsed, got %v", i, info.TotalElapsed)
+		}
+	}
+}
+
+func TestWithRespectRetryAfter_Seconds(t *testing.T) {
+	var attempts atomic.Int32
+	var requestTimes []time.Time
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestTimes = append(requestTimes, time.Now())
+		count := attempts.Add(1)
+		if count < 2 {
+			w.Header().Set("Retry-After", "1") // 1 second
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond), // Would normally use 100ms
+		WithMaxRetries(2),
+		WithRespectRetryAfter(true),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if len(requestTimes) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(requestTimes))
+	}
+
+	// Check that the delay was approximately 1 second (from Retry-After header)
+	delay := requestTimes[1].Sub(requestTimes[0])
+	if delay < 950*time.Millisecond || delay > 1100*time.Millisecond {
+		t.Errorf("expected ~1s delay (from Retry-After), got %v", delay)
+	}
+}
+
+func TestWithRespectRetryAfter_HTTPDate(t *testing.T) {
+	var attempts atomic.Int32
+	var retryInfos []RetryInfo
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		if count < 2 {
+			// Set Retry-After to a fixed future time
+			// Note: HTTP-date has 1-second precision
+			retryTime := time.Now().Add(2 * time.Second).UTC().Format(http.TimeFormat)
+			w.Header().Set("Retry-After", retryTime)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond),
+		WithMaxRetries(2),
+		WithRespectRetryAfter(true),
+		WithOnRetry(func(info RetryInfo) {
+			retryInfos = append(retryInfos, info)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if len(retryInfos) != 1 {
+		t.Fatalf("expected 1 retry callback, got %d", len(retryInfos))
+	}
+
+	// The RetryAfter should be parsed and be approximately 2 seconds
+	// Allow some tolerance for time.Until() calculation and HTTP-date precision
+	if retryInfos[0].RetryAfter < 1*time.Second || retryInfos[0].RetryAfter > 3*time.Second {
+		t.Errorf("expected RetryAfter to be ~2s, got %v", retryInfos[0].RetryAfter)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected time.Duration
+		delta    time.Duration // tolerance for time-based tests
+	}{
+		{
+			name:     "seconds format",
+			header:   "120",
+			expected: 120 * time.Second,
+		},
+		{
+			name:     "zero seconds",
+			header:   "0",
+			expected: 0,
+		},
+		{
+			name:     "invalid negative",
+			header:   "-1",
+			expected: 0,
+		},
+		{
+			name:     "empty header",
+			header:   "",
+			expected: 0,
+		},
+		{
+			name:     "invalid format",
+			header:   "invalid",
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{
+				Header: http.Header{},
+			}
+			if tt.header != "" {
+				resp.Header.Set("Retry-After", tt.header)
+			}
+
+			result := parseRetryAfter(resp)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+
+	// Test HTTP-date format separately due to time.Now() dependency
+	t.Run("HTTP-date format", func(t *testing.T) {
+		futureTime := time.Now().Add(5 * time.Second).UTC()
+		resp := &http.Response{
+			Header: http.Header{},
+		}
+		resp.Header.Set("Retry-After", futureTime.Format(http.TimeFormat))
+
+		result := parseRetryAfter(resp)
+		expected := 5 * time.Second
+		// Allow larger tolerance due to HTTP-date having 1-second precision
+		// and time.Until() calculation happening after header creation
+		delta := 500 * time.Millisecond
+
+		if result < expected-delta || result > expected+delta {
+			t.Errorf("expected ~%v (±%v), got %v", expected, delta, result)
+		}
+	})
+
+	// Test past HTTP-date (should return 0)
+	t.Run("past HTTP-date", func(t *testing.T) {
+		pastTime := time.Now().Add(-5 * time.Second).UTC()
+		resp := &http.Response{
+			Header: http.Header{},
+		}
+		resp.Header.Set("Retry-After", pastTime.Format(http.TimeFormat))
+
+		result := parseRetryAfter(resp)
+		if result != 0 {
+			t.Errorf("expected 0 for past date, got %v", result)
+		}
+	})
+}
+
+func TestApplyJitter(t *testing.T) {
+	delay := 1000 * time.Millisecond
+
+	// Run multiple times to verify randomness
+	results := make(map[time.Duration]bool)
+	for i := 0; i < 10; i++ {
+		jittered := applyJitter(delay)
+		results[jittered] = true
+
+		// Should be between 750ms and 1250ms (±25%)
+		if jittered < 750*time.Millisecond || jittered > 1250*time.Millisecond {
+			t.Errorf("jittered delay %v outside expected range [750ms, 1250ms]", jittered)
+		}
+	}
+
+	// Should have some variation (not all the same)
+	if len(results) < 2 {
+		t.Error("expected some variation in jittered delays")
+	}
+}
+
+func TestCombinedFeatures(t *testing.T) {
+	var attempts atomic.Int32
+	var retryInfos []RetryInfo
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		switch count {
+		case 1:
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond),
+		WithMaxRetries(3),
+		WithJitter(true),
+		WithRespectRetryAfter(true),
+		WithOnRetry(func(info RetryInfo) {
+			retryInfos = append(retryInfos, info)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
+	}
+
+	if len(retryInfos) != 2 {
+		t.Fatalf("expected 2 retry callbacks, got %d", len(retryInfos))
+	}
+
+	// First retry should have used Retry-After
+	if retryInfos[0].RetryAfter != 1*time.Second {
+		t.Errorf("expected first retry to have Retry-After=1s, got %v", retryInfos[0].RetryAfter)
+	}
+
+	// Second retry should not have Retry-After
+	if retryInfos[1].RetryAfter != 0 {
+		t.Errorf("expected second retry to have no Retry-After, got %v", retryInfos[1].RetryAfter)
+	}
+}

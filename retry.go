@@ -6,8 +6,10 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -29,11 +31,27 @@ type Client struct {
 	retryableChecker   RetryableChecker
 	customCertsPEM     [][]byte // Store PEM bytes to merge with system certs later
 	insecureSkipVerify bool     // Skip TLS certificate verification
+	jitterEnabled      bool     // Add random jitter to retry delays
+	onRetryFunc        OnRetryFunc
+	respectRetryAfter  bool // Respect Retry-After header from responses
 	err                error
 }
 
 // RetryableChecker determines if an error or response should trigger a retry
 type RetryableChecker func(err error, resp *http.Response) bool
+
+// RetryInfo contains information about a retry attempt
+type RetryInfo struct {
+	Attempt      int           // Current attempt number (1-indexed)
+	Delay        time.Duration // Delay before this retry
+	Err          error         // Error that triggered the retry (nil if retrying due to response status)
+	StatusCode   int           // HTTP status code (0 if request failed)
+	RetryAfter   time.Duration // Retry-After duration from response header (0 if not present)
+	TotalElapsed time.Duration // Total time elapsed since first attempt
+}
+
+// OnRetryFunc is called before each retry attempt
+type OnRetryFunc func(info RetryInfo)
 
 // Option configures a Client
 type Option func(*Client)
@@ -89,6 +107,33 @@ func WithRetryableChecker(checker RetryableChecker) Option {
 		if checker != nil {
 			c.retryableChecker = checker
 		}
+	}
+}
+
+// WithJitter enables random jitter to prevent thundering herd problem.
+// When enabled, retry delays will be randomized by ±25% to avoid synchronized retries
+// from multiple clients hitting the server at the same time.
+func WithJitter(enabled bool) Option {
+	return func(c *Client) {
+		c.jitterEnabled = enabled
+	}
+}
+
+// WithOnRetry sets a callback function that will be called before each retry attempt.
+// This is useful for logging, metrics collection, or custom retry logic.
+func WithOnRetry(fn OnRetryFunc) Option {
+	return func(c *Client) {
+		c.onRetryFunc = fn
+	}
+}
+
+// WithRespectRetryAfter enables respecting the Retry-After header from HTTP responses.
+// When enabled, the client will use the server-provided retry delay instead of
+// the exponential backoff delay. This is useful for rate limiting scenarios.
+// The Retry-After header can be either a number of seconds or an HTTP-date.
+func WithRespectRetryAfter(enabled bool) Option {
+	return func(c *Client) {
+		c.respectRetryAfter = enabled
 	}
 }
 
@@ -320,15 +365,94 @@ func DefaultRetryableChecker(err error, resp *http.Response) bool {
 	return statusCode >= 500 || statusCode == http.StatusTooManyRequests
 }
 
+// parseRetryAfter parses the Retry-After header and returns the duration to wait.
+// The Retry-After header can be either a number of seconds or an HTTP-date.
+// Returns 0 if the header is not present or cannot be parsed.
+func parseRetryAfter(resp *http.Response) time.Duration {
+	if resp == nil {
+		return 0
+	}
+
+	retryAfter := resp.Header.Get("Retry-After")
+	if retryAfter == "" {
+		return 0
+	}
+
+	// Try parsing as seconds (integer)
+	if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try parsing as HTTP-date (RFC1123, RFC850, or ANSI C asctime format)
+	if t, err := http.ParseTime(retryAfter); err == nil {
+		duration := time.Until(t)
+		if duration > 0 {
+			return duration
+		}
+	}
+
+	return 0
+}
+
+// applyJitter adds random jitter to the delay (±25% of the original value)
+func applyJitter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	// Add jitter: delay * (0.75 + random[0, 0.5])
+	// #nosec G404 - Cryptographic randomness not required for jitter
+	jitter := 0.75 + rand.Float64()*0.5
+	return time.Duration(float64(delay) * jitter)
+}
+
 // Do executes an HTTP request with automatic retry logic using exponential backoff
 func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var resp *http.Response
 	delay := c.initialRetryDelay
+	startTime := time.Now()
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			// Wait before retry (exponential backoff)
+			// Check for Retry-After header if enabled
+			var retryAfterDelay time.Duration
+			if c.respectRetryAfter && resp != nil {
+				retryAfterDelay = parseRetryAfter(resp)
+			}
+
+			// Use Retry-After if available, otherwise use exponential backoff
+			actualDelay := delay
+			if retryAfterDelay > 0 {
+				actualDelay = retryAfterDelay
+			}
+
+			// Apply jitter if enabled
+			if c.jitterEnabled {
+				actualDelay = applyJitter(actualDelay)
+			}
+
+			// Cap the delay at maxRetryDelay
+			if actualDelay > c.maxRetryDelay {
+				actualDelay = c.maxRetryDelay
+			}
+
+			// Call onRetry callback if set
+			if c.onRetryFunc != nil {
+				statusCode := 0
+				if resp != nil {
+					statusCode = resp.StatusCode
+				}
+				c.onRetryFunc(RetryInfo{
+					Attempt:      attempt,
+					Delay:        actualDelay,
+					Err:          lastErr,
+					StatusCode:   statusCode,
+					RetryAfter:   retryAfterDelay,
+					TotalElapsed: time.Since(startTime),
+				})
+			}
+
+			// Wait before retry
 			select {
 			case <-ctx.Done():
 				if lastErr != nil {
@@ -339,8 +463,8 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 					)
 				}
 				return nil, ctx.Err()
-			case <-time.After(delay):
-				// Calculate next delay with exponential backoff
+			case <-time.After(actualDelay):
+				// Calculate next delay with exponential backoff (for next iteration)
 				delay = time.Duration(float64(delay) * c.retryDelayMultiple)
 				if delay > c.maxRetryDelay {
 					delay = c.maxRetryDelay

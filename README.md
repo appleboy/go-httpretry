@@ -28,6 +28,9 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithCertFromBytes(certPEM []byte)`](#withcertfrombytescertpem-byte)
     - [`WithCertFromURL(certURL string)`](#withcertfromurlcerturl-string)
     - [`WithInsecureSkipVerify()`](#withinsecureskipverify)
+    - [`WithJitter(enabled bool)`](#withjitterenabled-bool)
+    - [`WithRespectRetryAfter(enabled bool)`](#withrespectretryafterenabled-bool)
+    - [`WithOnRetry(fn OnRetryFunc)`](#withonretryfn-onretryfunc)
   - [Default Retry Behavior](#default-retry-behavior)
   - [Exponential Backoff](#exponential-backoff)
   - [Context Support](#context-support)
@@ -40,6 +43,10 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Multiple Certificate Sources](#multiple-certificate-sources)
     - [Custom HTTP Client with Certificates](#custom-http-client-with-certificates)
     - [Skip SSL Verification for Testing](#skip-ssl-verification-for-testing)
+    - [Retry with Jitter to Prevent Thundering Herd](#retry-with-jitter-to-prevent-thundering-herd)
+    - [Respect Rate Limiting with Retry-After Header](#respect-rate-limiting-with-retry-after-header)
+    - [Observability with Retry Callbacks](#observability-with-retry-callbacks)
+    - [Production-Ready Configuration](#production-ready-configuration)
   - [Testing](#testing)
   - [Design Principles](#design-principles)
 
@@ -47,6 +54,9 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
+- **Jitter Support**: Optional random jitter to prevent thundering herd problem
+- **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
+- **Observability Hooks**: Callback functions for logging, metrics, and custom retry logic
 - **Flexible Configuration**: Use functional options to customize retry behavior
 - **Context Support**: Respects context cancellation and timeouts
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
@@ -259,6 +269,66 @@ client, err := retry.NewClient(
 
 For production environments with self-signed certificates, prefer using `WithCertFromFile`, `WithCertFromBytes`, or `WithCertFromURL` to explicitly trust specific certificates.
 
+### `WithJitter(enabled bool)`
+
+Enables random jitter to prevent thundering herd problem. When enabled, retry delays will be randomized by ±25% to avoid synchronized retries from multiple clients.
+
+```go
+client, err := retry.NewClient(
+    retry.WithJitter(true),
+    retry.WithMaxRetries(3),
+)
+```
+
+**Use Case**: When multiple clients might fail simultaneously (e.g., during a service outage), jitter prevents them from retrying at the exact same time, reducing load spikes on the recovering service.
+
+### `WithRespectRetryAfter(enabled bool)`
+
+Enables respecting the `Retry-After` header from HTTP responses. When enabled, the client will use the server-provided retry delay instead of exponential backoff.
+
+The `Retry-After` header can be:
+
+- **Seconds**: An integer number of seconds (e.g., `Retry-After: 120`)
+- **HTTP-date**: An RFC1123 date (e.g., `Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`)
+
+```go
+client, err := retry.NewClient(
+    retry.WithRespectRetryAfter(true),
+    retry.WithMaxRetries(5),
+)
+```
+
+**Use Case**: Essential for proper rate limiting compliance. When a server responds with 429 (Too Many Requests) or 503 (Service Unavailable), it often includes a `Retry-After` header indicating when to retry.
+
+### `WithOnRetry(fn OnRetryFunc)`
+
+Sets a callback function that will be called before each retry attempt. Useful for logging, metrics collection, or custom retry logic.
+
+```go
+client, err := retry.NewClient(
+    retry.WithOnRetry(func(info retry.RetryInfo) {
+        log.Printf("Retry attempt %d after %v (status: %d, error: %v)",
+            info.Attempt,
+            info.Delay,
+            info.StatusCode,
+            info.Err,
+        )
+    }),
+    retry.WithMaxRetries(3),
+)
+```
+
+The `RetryInfo` struct contains:
+
+- `Attempt`: Current attempt number (1-indexed)
+- `Delay`: Delay before this retry
+- `Err`: Error that triggered the retry (nil if retrying due to response status)
+- `StatusCode`: HTTP status code (0 if request failed)
+- `RetryAfter`: Retry-After duration from response header (0 if not present)
+- `TotalElapsed`: Total time elapsed since first attempt
+
+**Use Case**: Essential for production observability - integrate with your logging system, metrics (Prometheus, Datadog), or alerting.
+
 ## Default Retry Behavior
 
 The `DefaultRetryableChecker` retries in the following cases:
@@ -457,6 +527,152 @@ defer resp.Body.Close()
 **Important Security Note**: Never use `WithInsecureSkipVerify()` in production. For production environments with self-signed certificates, use `WithCertFromFile()`, `WithCertFromBytes()`, or `WithCertFromURL()` to explicitly trust specific certificates.
 
 For more details on certificate usage, see [CERT_USAGE.md](CERT_USAGE.md).
+
+### Retry with Jitter to Prevent Thundering Herd
+
+```go
+// Enable jitter to randomize retry delays
+client, err := retry.NewClient(
+    retry.WithMaxRetries(5),
+    retry.WithInitialRetryDelay(1*time.Second),
+    retry.WithJitter(true), // Adds ±25% randomization
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+ctx := context.Background()
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### Respect Rate Limiting with Retry-After Header
+
+```go
+// Enable Retry-After header support for proper rate limiting
+client, err := retry.NewClient(
+    retry.WithRespectRetryAfter(true),
+    retry.WithMaxRetries(5),
+    retry.WithInitialRetryDelay(1*time.Second), // Fallback if no Retry-After header
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// When the server responds with 429 + Retry-After: 60,
+// the client will wait 60 seconds instead of using exponential backoff
+ctx := context.Background()
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/rate-limited", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### Observability with Retry Callbacks
+
+```go
+// Set up retry callback for logging and metrics
+var retryCount int
+client, err := retry.NewClient(
+    retry.WithMaxRetries(3),
+    retry.WithOnRetry(func(info retry.RetryInfo) {
+        retryCount++
+        log.Printf("[RETRY] Attempt %d/%d after %v (total: %v)",
+            info.Attempt,
+            3, // max retries
+            info.Delay,
+            info.TotalElapsed,
+        )
+
+        if info.Err != nil {
+            log.Printf("[RETRY] Error: %v", info.Err)
+        } else {
+            log.Printf("[RETRY] Status: %d", info.StatusCode)
+        }
+
+        if info.RetryAfter > 0 {
+            log.Printf("[RETRY] Server requested retry after: %v", info.RetryAfter)
+        }
+
+        // Send metrics to your monitoring system
+        // metrics.IncrementRetryCounter("api_call", info.StatusCode)
+    }),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+ctx := context.Background()
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Printf("Request failed after %d retries: %v", retryCount, err)
+    return
+}
+defer resp.Body.Close()
+
+log.Printf("Request succeeded after %d retries", retryCount)
+```
+
+### Production-Ready Configuration
+
+Combine all features for a robust production setup:
+
+```go
+client, err := retry.NewClient(
+    // Basic retry configuration
+    retry.WithMaxRetries(5),
+    retry.WithInitialRetryDelay(1*time.Second),
+    retry.WithMaxRetryDelay(30*time.Second),
+    retry.WithRetryDelayMultiple(2.0),
+
+    // Enable jitter to prevent thundering herd
+    retry.WithJitter(true),
+
+    // Respect server's rate limiting
+    retry.WithRespectRetryAfter(true),
+
+    // Observability
+    retry.WithOnRetry(func(info retry.RetryInfo) {
+        // Log retry attempts
+        logger.Warn("HTTP request retry",
+            "attempt", info.Attempt,
+            "delay", info.Delay,
+            "status", info.StatusCode,
+            "elapsed", info.TotalElapsed,
+        )
+
+        // Record metrics
+        metrics.RecordRetry(info.StatusCode, info.Attempt)
+    }),
+
+    // Custom retry logic
+    retry.WithRetryableChecker(func(err error, resp *http.Response) bool {
+        // Always retry network errors
+        if err != nil {
+            return true
+        }
+
+        // Retry on 5xx, 429, and also 408 (Request Timeout)
+        if resp != nil {
+            return resp.StatusCode >= 500 ||
+                   resp.StatusCode == http.StatusTooManyRequests ||
+                   resp.StatusCode == http.StatusRequestTimeout
+        }
+
+        return false
+    }),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
 
 ## Testing
 
