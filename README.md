@@ -1,4 +1,10 @@
-# Retry Package
+# go-httpretry
+
+[![Testing](https://github.com/appleboy/go-httpretry/actions/workflows/testing.yml/badge.svg)](https://github.com/appleboy/go-httpretry/actions/workflows/testing.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/appleboy/go-httpretry)](https://goreportcard.com/report/github.com/appleboy/go-httpretry)
+[![codecov](https://codecov.io/gh/appleboy/go-httpretry/branch/main/graph/badge.svg)](https://codecov.io/gh/appleboy/go-httpretry)
+[![Go Reference](https://pkg.go.dev/badge/github.com/appleboy/go-httpretry.svg)](https://pkg.go.dev/github.com/appleboy/go-httpretry)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A flexible HTTP client with automatic retry logic using exponential backoff, built with the Functional Options Pattern.
 
@@ -13,6 +19,14 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 ## Installation
 
+Install the package using `go get`:
+
+```bash
+go get github.com/appleboy/go-httpretry
+```
+
+Then import it in your Go code:
+
 ```go
 import "github.com/appleboy/go-httpretry"
 ```
@@ -22,19 +36,31 @@ import "github.com/appleboy/go-httpretry"
 ### Basic Usage (Default Settings)
 
 ```go
-// Create a retry client with defaults:
-// - 3 max retries
-// - 1 second initial delay
-// - 10 second max delay
-// - 2.0x exponential multiplier
-client := retry.NewClient()
+package main
 
-req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
-resp, err := client.Do(context.Background(), req)
-if err != nil {
-    log.Fatal(err)
+import (
+    "context"
+    "log"
+    "net/http"
+
+    "github.com/appleboy/go-httpretry"
+)
+
+func main() {
+    // Create a retry client with defaults:
+    // - 3 max retries
+    // - 1 second initial delay
+    // - 10 second max delay
+    // - 2.0x exponential multiplier
+    client := retry.NewClient()
+
+    req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+    resp, err := client.Do(context.Background(), req)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
 }
-defer resp.Body.Close()
 ```
 
 ### Custom Configuration
