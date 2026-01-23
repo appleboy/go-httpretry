@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Table of Contents
+
+- [Project Overview](#project-overview)
+- [Architecture](#architecture)
+  - [Core Components](#core-components)
+  - [Defaults](#defaults)
+  - [Exponential Backoff](#exponential-backoff)
+- [Testing](#testing)
+- [Development Commands](#development-commands)
+- [CI/CD](#cicd)
+- [Important Constraints](#important-constraints)
+
 ## Project Overview
 
 `go-httpretry` is a Go library providing an HTTP client with automatic retry logic using exponential backoff. It's built using the Functional Options Pattern and has zero external dependencies beyond the Go standard library.
