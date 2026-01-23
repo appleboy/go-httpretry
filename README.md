@@ -8,6 +8,31 @@
 
 A flexible HTTP client with automatic retry logic using exponential backoff, built with the Functional Options Pattern.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+  - [Basic Usage (Default Settings)](#basic-usage-default-settings)
+  - [Custom Configuration](#custom-configuration)
+- [Configuration Options](#configuration-options)
+  - [WithMaxRetries(n int)](#withmaxretriesn-int)
+  - [WithInitialRetryDelay(d time.Duration)](#withinitialretrydelayd-timeduration)
+  - [WithMaxRetryDelay(d time.Duration)](#withmaxretrydelayd-timeduration)
+  - [WithRetryDelayMultiple(multiplier float64)](#withretrydelaymultiplemultiplier-float64)
+  - [WithHTTPClient(httpClient *http.Client)](#withhttpclienthttpclient-httpclient)
+  - [WithRetryableChecker(checker RetryableChecker)](#withretryablecheckerchecker-retryablechecker)
+- [Default Retry Behavior](#default-retry-behavior)
+- [Exponential Backoff](#exponential-backoff)
+- [Context Support](#context-support)
+- [Examples](#examples)
+  - [Disable Retries](#disable-retries)
+  - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
+  - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
+  - [Custom Retry Logic for Authentication Tokens](#custom-retry-logic-for-authentication-tokens)
+- [Testing](#testing)
+- [Design Principles](#design-principles)
+
 ## Features
 
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
