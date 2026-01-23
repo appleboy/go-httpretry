@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/appleboy/authgate/internal/retry"
+	retry "github.com/appleboy/go-httpretry"
 )
 
 // Example_basic demonstrates basic usage with default configuration
