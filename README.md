@@ -10,28 +10,36 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 ## Table of Contents
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [Basic Usage (Default Settings)](#basic-usage-default-settings)
-  - [Custom Configuration](#custom-configuration)
-- [Configuration Options](#configuration-options)
-  - [WithMaxRetries(n int)](#withmaxretriesn-int)
-  - [WithInitialRetryDelay(d time.Duration)](#withinitialretrydelayd-timeduration)
-  - [WithMaxRetryDelay(d time.Duration)](#withmaxretrydelayd-timeduration)
-  - [WithRetryDelayMultiple(multiplier float64)](#withretrydelaymultiplemultiplier-float64)
-  - [WithHTTPClient(httpClient *http.Client)](#withhttpclienthttpclient-httpclient)
-  - [WithRetryableChecker(checker RetryableChecker)](#withretryablecheckerchecker-retryablechecker)
-- [Default Retry Behavior](#default-retry-behavior)
-- [Exponential Backoff](#exponential-backoff)
-- [Context Support](#context-support)
-- [Examples](#examples)
-  - [Disable Retries](#disable-retries)
-  - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
-  - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
-  - [Custom Retry Logic for Authentication Tokens](#custom-retry-logic-for-authentication-tokens)
-- [Testing](#testing)
-- [Design Principles](#design-principles)
+- [go-httpretry](#go-httpretry)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Installation](#installation)
+  - [Quick Start](#quick-start)
+    - [Basic Usage (Default Settings)](#basic-usage-default-settings)
+    - [Custom Configuration](#custom-configuration)
+  - [Configuration Options](#configuration-options)
+    - [`WithMaxRetries(n int)`](#withmaxretriesn-int)
+    - [`WithInitialRetryDelay(d time.Duration)`](#withinitialretrydelayd-timeduration)
+    - [`WithMaxRetryDelay(d time.Duration)`](#withmaxretrydelayd-timeduration)
+    - [`WithRetryDelayMultiple(multiplier float64)`](#withretrydelaymultiplemultiplier-float64)
+    - [`WithHTTPClient(httpClient *http.Client)`](#withhttpclienthttpclient-httpclient)
+    - [`WithRetryableChecker(checker RetryableChecker)`](#withretryablecheckerchecker-retryablechecker)
+    - [`WithCertFromFile(certPath string)`](#withcertfromfilecertpath-string)
+    - [`WithCertFromBytes(certPEM []byte)`](#withcertfrombytescertpem-byte)
+    - [`WithCertFromURL(certURL string)`](#withcertfromurlcerturl-string)
+  - [Default Retry Behavior](#default-retry-behavior)
+  - [Exponential Backoff](#exponential-backoff)
+  - [Context Support](#context-support)
+  - [Examples](#examples)
+    - [Disable Retries](#disable-retries)
+    - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
+    - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
+    - [Custom Retry Logic for Authentication Tokens](#custom-retry-logic-for-authentication-tokens)
+    - [Connecting to Internal Services with Custom Certificates](#connecting-to-internal-services-with-custom-certificates)
+    - [Multiple Certificate Sources](#multiple-certificate-sources)
+    - [Custom HTTP Client with Certificates](#custom-http-client-with-certificates)
+  - [Testing](#testing)
+  - [Design Principles](#design-principles)
 
 ## Features
 
@@ -41,6 +49,8 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Context Support**: Respects context cancellation and timeouts
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
 - **Resource Safe**: Automatically closes response bodies before retries to prevent leaks
+- **Enterprise Certificate Support**: Load custom TLS certificates from files, memory, or URLs for internal/self-signed CAs
+- **Zero Dependencies**: Uses only Go standard library
 
 ## Installation
 
@@ -77,7 +87,10 @@ func main() {
     // - 1 second initial delay
     // - 10 second max delay
     // - 2.0x exponential multiplier
-    client := retry.NewClient()
+    client, err := retry.NewClient()
+    if err != nil {
+        log.Fatal(err)
+    }
 
     req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
     resp, err := client.Do(context.Background(), req)
@@ -91,12 +104,15 @@ func main() {
 ### Custom Configuration
 
 ```go
-client := retry.NewClient(
+client, err := retry.NewClient(
     retry.WithMaxRetries(5),                           // Retry up to 5 times
     retry.WithInitialRetryDelay(500*time.Millisecond), // Start with 500ms delay
     retry.WithMaxRetryDelay(30*time.Second),           // Cap delay at 30s
     retry.WithRetryDelayMultiple(3.0),                 // Triple delay each time
 )
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## Configuration Options
@@ -106,7 +122,10 @@ client := retry.NewClient(
 Sets the maximum number of retry attempts.
 
 ```go
-client := retry.NewClient(retry.WithMaxRetries(5))
+client, err := retry.NewClient(retry.WithMaxRetries(5))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### `WithInitialRetryDelay(d time.Duration)`
@@ -114,7 +133,10 @@ client := retry.NewClient(retry.WithMaxRetries(5))
 Sets the initial delay before the first retry.
 
 ```go
-client := retry.NewClient(retry.WithInitialRetryDelay(500*time.Millisecond))
+client, err := retry.NewClient(retry.WithInitialRetryDelay(500*time.Millisecond))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### `WithMaxRetryDelay(d time.Duration)`
@@ -122,7 +144,10 @@ client := retry.NewClient(retry.WithInitialRetryDelay(500*time.Millisecond))
 Sets the maximum delay between retries (caps exponential backoff).
 
 ```go
-client := retry.NewClient(retry.WithMaxRetryDelay(30*time.Second))
+client, err := retry.NewClient(retry.WithMaxRetryDelay(30*time.Second))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### `WithRetryDelayMultiple(multiplier float64)`
@@ -130,7 +155,10 @@ client := retry.NewClient(retry.WithMaxRetryDelay(30*time.Second))
 Sets the exponential backoff multiplier.
 
 ```go
-client := retry.NewClient(retry.WithRetryDelayMultiple(3.0))
+client, err := retry.NewClient(retry.WithRetryDelayMultiple(3.0))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### `WithHTTPClient(httpClient *http.Client)`
@@ -144,7 +172,10 @@ httpClient := &http.Client{
         MaxIdleConns: 100,
     },
 }
-client := retry.NewClient(retry.WithHTTPClient(httpClient))
+client, err := retry.NewClient(retry.WithHTTPClient(httpClient))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### `WithRetryableChecker(checker RetryableChecker)`
@@ -165,8 +196,47 @@ customChecker := func(err error, resp *http.Response) bool {
            resp.StatusCode == http.StatusForbidden
 }
 
-client := retry.NewClient(retry.WithRetryableChecker(customChecker))
+client, err := retry.NewClient(retry.WithRetryableChecker(customChecker))
+if err != nil {
+    log.Fatal(err)
+}
 ```
+
+### `WithCertFromFile(certPath string)`
+
+Loads a PEM-encoded certificate from a file path and adds it to the trusted certificate pool.
+
+```go
+client, err := retry.NewClient(
+    retry.WithCertFromFile("/path/to/internal-ca.pem"),
+)
+```
+
+### `WithCertFromBytes(certPEM []byte)`
+
+Loads a PEM-encoded certificate from memory and adds it to the trusted certificate pool.
+
+```go
+certPEM := []byte(`-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----`)
+
+client, err := retry.NewClient(
+    retry.WithCertFromBytes(certPEM),
+)
+```
+
+### `WithCertFromURL(certURL string)`
+
+Downloads a PEM-encoded certificate from a URL and adds it to the trusted certificate pool. The download has a fixed timeout of 30 seconds.
+
+```go
+client, err := retry.NewClient(
+    retry.WithCertFromURL("https://pki.company.com/certs/internal-ca.pem"),
+)
+```
+
+**Note**: Custom certificates are merged with the system certificate pool, allowing connections to both public and internal services. Certificates work seamlessly with both default and custom HTTP clients.
 
 ## Default Retry Behavior
 
@@ -220,29 +290,38 @@ if err != nil {
 
 ```go
 // Set maxRetries to 0 to disable retries
-client := retry.NewClient(retry.WithMaxRetries(0))
+client, err := retry.NewClient(retry.WithMaxRetries(0))
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### Aggressive Retries for Critical Requests
 
 ```go
-client := retry.NewClient(
+client, err := retry.NewClient(
     retry.WithMaxRetries(10),
     retry.WithInitialRetryDelay(100*time.Millisecond),
     retry.WithMaxRetryDelay(5*time.Second),
     retry.WithRetryDelayMultiple(1.5),
 )
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### Conservative Retries for Background Tasks
 
 ```go
-client := retry.NewClient(
+client, err := retry.NewClient(
     retry.WithMaxRetries(2),
     retry.WithInitialRetryDelay(5*time.Second),
     retry.WithMaxRetryDelay(60*time.Second),
     retry.WithRetryDelayMultiple(2.0),
 )
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### Custom Retry Logic for Authentication Tokens
@@ -260,24 +339,89 @@ authRetryChecker := func(err error, resp *http.Response) bool {
            resp.StatusCode == http.StatusUnauthorized
 }
 
-client := retry.NewClient(
+client, err := retry.NewClient(
     retry.WithRetryableChecker(authRetryChecker),
     retry.WithMaxRetries(3),
 )
+if err != nil {
+    log.Fatal(err)
+}
 ```
+
+### Connecting to Internal Services with Custom Certificates
+
+Load custom certificates to connect to services with self-signed or internal CA certificates:
+
+```go
+// Load certificate from file
+client, err := retry.NewClient(
+    retry.WithCertFromFile("/path/to/internal-ca.pem"),
+    retry.WithMaxRetries(3),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+ctx := context.Background()
+req, _ := http.NewRequest(http.MethodGet, "https://internal.company.com/api/data", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### Multiple Certificate Sources
+
+Combine certificates from multiple sources:
+
+```go
+client, err := retry.NewClient(
+    retry.WithCertFromFile("/path/to/ca1.pem"),
+    retry.WithCertFromFile("/path/to/ca2.pem"),
+    retry.WithCertFromURL("https://pki.company.com/ca3.pem"),
+    retry.WithMaxRetries(3),
+)
+```
+
+### Custom HTTP Client with Certificates
+
+Certificates are automatically merged into your custom HTTP client:
+
+```go
+// Create custom HTTP client with specific settings
+customHTTPClient := &http.Client{
+    Timeout: 10 * time.Second,
+    Transport: &http.Transport{
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+        IdleConnTimeout:     90 * time.Second,
+    },
+}
+
+// Add certificates to the custom client
+// The library will merge the certificates into the client's transport
+client, err := retry.NewClient(
+    retry.WithHTTPClient(customHTTPClient),
+    retry.WithCertFromFile("/path/to/internal-ca.pem"),
+    retry.WithMaxRetries(3),
+)
+```
+
+For more details on certificate usage, see [CERT_USAGE.md](CERT_USAGE.md).
 
 ## Testing
 
 Run the test suite:
 
 ```bash
-go test -v ./internal/retry/
+go test -v ./...
 ```
 
 With coverage:
 
 ```bash
-go test -v -cover ./internal/retry/
+go test -v -cover ./...
 ```
 
 ## Design Principles
@@ -287,4 +431,6 @@ go test -v -cover ./internal/retry/
 - **Context-Aware**: Respects cancellation and timeouts
 - **Resource Safe**: Prevents response body leaks by closing them before retries
 - **Request Cloning**: Clones requests for each retry to handle consumed request bodies
+- **Certificate Merging**: Custom certificates are merged with system certificates, not replacing them
+- **Transport Safety**: Safely clones and modifies HTTP transports without affecting shared instances
 - **Zero Dependencies**: Uses only standard library
