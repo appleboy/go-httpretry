@@ -41,6 +41,9 @@ func TestNewClient_Defaults(t *testing.T) {
 	if client.httpClient == nil {
 		t.Error("expected httpClient to be set")
 	}
+	if !client.jitterEnabled {
+		t.Error("expected jitterEnabled to be true by default")
+	}
 }
 
 func TestNewClient_WithOptions(t *testing.T) {
@@ -364,6 +367,7 @@ func TestClient_Do_ExponentialBackoff(t *testing.T) {
 		WithMaxRetryDelay(500*time.Millisecond),
 		WithRetryDelayMultiple(2.0),
 		WithMaxRetries(3),
+		WithJitter(false), // Disable jitter for predictable timing tests
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -872,6 +876,30 @@ func TestWithInsecureSkipVerify_RealTLSConnection(t *testing.T) {
 	}
 }
 
+func TestWithJitter_Enabled(t *testing.T) {
+	// Test that jitter is enabled by default
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if !client.jitterEnabled {
+		t.Error("expected jitterEnabled to be true by default")
+	}
+}
+
+func TestWithJitter_Disabled(t *testing.T) {
+	// Test that jitter can be explicitly disabled
+	client, err := NewClient(
+		WithJitter(false),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if client.jitterEnabled {
+		t.Error("expected jitterEnabled to be false")
+	}
+}
+
 func TestWithJitter(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -993,6 +1021,7 @@ func TestWithRespectRetryAfter_Seconds(t *testing.T) {
 		WithInitialRetryDelay(100*time.Millisecond), // Would normally use 100ms
 		WithMaxRetries(2),
 		WithRespectRetryAfter(true),
+		WithJitter(false), // Disable jitter for predictable timing tests
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -1043,6 +1072,7 @@ func TestWithRespectRetryAfter_HTTPDate(t *testing.T) {
 		WithInitialRetryDelay(100*time.Millisecond),
 		WithMaxRetries(2),
 		WithRespectRetryAfter(true),
+		WithJitter(false), // Disable jitter for predictable timing tests
 		WithOnRetry(func(info RetryInfo) {
 			retryInfos = append(retryInfos, info)
 		}),

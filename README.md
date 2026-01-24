@@ -100,6 +100,7 @@ func main() {
     // - 1 second initial delay
     // - 10 second max delay
     // - 2.0x exponential multiplier
+    // - Jitter enabled (±25% randomization)
     client, err := retry.NewClient()
     if err != nil {
         log.Fatal(err)
@@ -271,16 +272,17 @@ For production environments with self-signed certificates, prefer using `WithCer
 
 ### `WithJitter(enabled bool)`
 
-Enables random jitter to prevent thundering herd problem. When enabled, retry delays will be randomized by ±25% to avoid synchronized retries from multiple clients.
+Controls random jitter to prevent thundering herd problem. **Jitter is enabled by default.** When enabled, retry delays will be randomized by ±25% to avoid synchronized retries from multiple clients.
 
 ```go
+// Jitter is enabled by default, but you can explicitly disable it if needed
 client, err := retry.NewClient(
-    retry.WithJitter(true),
+    retry.WithJitter(false), // Disable jitter for predictable delays
     retry.WithMaxRetries(3),
 )
 ```
 
-**Use Case**: When multiple clients might fail simultaneously (e.g., during a service outage), jitter prevents them from retrying at the exact same time, reducing load spikes on the recovering service.
+**Use Case**: When multiple clients might fail simultaneously (e.g., during a service outage), jitter prevents them from retrying at the exact same time, reducing load spikes on the recovering service. This is the recommended behavior for most production use cases.
 
 ### `WithRespectRetryAfter(enabled bool)`
 
@@ -531,11 +533,12 @@ For more details on certificate usage, see [CERT_USAGE.md](CERT_USAGE.md).
 ### Retry with Jitter to Prevent Thundering Herd
 
 ```go
-// Enable jitter to randomize retry delays
+// Jitter is enabled by default to randomize retry delays
+// This prevents the thundering herd problem in production systems
 client, err := retry.NewClient(
     retry.WithMaxRetries(5),
     retry.WithInitialRetryDelay(1*time.Second),
-    retry.WithJitter(true), // Adds ±25% randomization
+    // Note: WithJitter(true) is the default, no need to specify
 )
 if err != nil {
     log.Fatal(err)
@@ -632,8 +635,8 @@ client, err := retry.NewClient(
     retry.WithMaxRetryDelay(30*time.Second),
     retry.WithRetryDelayMultiple(2.0),
 
-    // Enable jitter to prevent thundering herd
-    retry.WithJitter(true),
+    // Note: Jitter is enabled by default to prevent thundering herd
+    // No need to call WithJitter(true) unless you want to explicitly disable it
 
     // Respect server's rate limiting
     retry.WithRespectRetryAfter(true),

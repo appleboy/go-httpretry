@@ -259,6 +259,7 @@ func NewClient(opts ...Option) (*Client, error) {
 		retryDelayMultiple: defaultRetryDelayMultiple,
 		httpClient:         http.DefaultClient,
 		retryableChecker:   DefaultRetryableChecker,
+		jitterEnabled:      true, // Enable jitter by default to prevent thundering herd
 	}
 
 	for _, opt := range opts {

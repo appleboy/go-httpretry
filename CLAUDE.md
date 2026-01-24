@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [Architecture](#architecture)
-  - [Core Components](#core-components)
-  - [Defaults](#defaults)
-  - [Exponential Backoff](#exponential-backoff)
-- [Testing](#testing)
-- [Development Commands](#development-commands)
-- [CI/CD](#cicd)
-- [Important Constraints](#important-constraints)
+- [CLAUDE.md](#claudemd)
+  - [Table of Contents](#table-of-contents)
+  - [Project Overview](#project-overview)
+  - [Architecture](#architecture)
+    - [Core Components](#core-components)
+    - [Defaults](#defaults)
+    - [Exponential Backoff](#exponential-backoff)
+  - [Testing](#testing)
+  - [Development Commands](#development-commands)
+  - [CI/CD](#cicd)
+  - [Important Constraints](#important-constraints)
 
 ## Project Overview
 
@@ -38,12 +40,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Defaults
 
-The library ships with sensible defaults (see constants in retry.go:11-16):
+The library ships with sensible defaults (see constants in retry.go:17-22 and NewClient in retry.go:254-263):
 
 - Max retries: 3
 - Initial delay: 1 second
 - Max delay: 10 seconds
 - Backoff multiplier: 2.0x
+- Jitter: Enabled (±25% randomization to prevent thundering herd)
 - Retry checker: `DefaultRetryableChecker` (retries on network errors, 5xx, and 429)
 
 ### Exponential Backoff
