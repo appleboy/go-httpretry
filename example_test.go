@@ -2,9 +2,12 @@ package retry_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	retry "github.com/appleboy/go-httpretry"
@@ -205,181 +208,97 @@ func Example_noRetries() {
 	fmt.Println("Request executed once (no retries)")
 }
 
-// Example_withCertFromFile demonstrates loading a certificate from a file
-func Example_withCertFromFile() {
-	// Load a custom certificate from a file
-	// This is useful for connecting to servers with self-signed or internal CA certificates
-	client, err := retry.NewClient(
-		retry.WithCertFromFile("/path/to/internal-ca.pem"),
-		retry.WithMaxRetries(3),
-	)
+// Example_customTLSConfiguration demonstrates how to configure TLS
+// when using go-httpretry with services that require custom certificates.
+//
+// This example shows the recommended approach: configure your http.Client
+// with the desired TLS settings, then pass it to the retry client.
+func Example_customTLSConfiguration() {
+	// Step 1: Load custom certificate
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		// Fall back to empty pool if system pool unavailable
+		certPool = x509.NewCertPool()
+	}
+
+	certPEM, err := os.ReadFile("/path/to/internal-ca.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"https://internal.company.com/api/data",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
+	if !certPool.AppendCertsFromPEM(certPEM) {
+		log.Fatal("failed to append certificate")
 	}
 
-	resp, err := client.Do(ctx, req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Connected securely: %d\n", resp.StatusCode)
-}
-
-// Example_withCertFromURL demonstrates downloading a certificate from a URL
-func Example_withCertFromURL() {
-	// Download and trust a certificate from a URL
-	// This is useful for dynamically loading certificates from certificate servers
-	client, err := retry.NewClient(
-		retry.WithCertFromURL("https://pki.company.com/certs/internal-ca.pem"),
-		retry.WithMaxRetries(3),
-	)
-	if err != nil {
-		log.Fatal(err)
+	// Step 2: Create TLS configuration
+	tlsConfig := &tls.Config{
+		RootCAs:    certPool,
+		MinVersion: tls.VersionTLS12, // Enforce TLS 1.2+
 	}
 
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"https://internal.company.com/api/data",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	resp, err := client.Do(ctx, req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Connected with downloaded cert: %d\n", resp.StatusCode)
-}
-
-// Example_withMultipleCerts demonstrates using multiple certificates
-func Example_withMultipleCerts() {
-	// Trust multiple certificates from different sources
-	// This is useful when connecting to multiple internal services
-	// with different CAs or certificate chains
-	client, err := retry.NewClient(
-		retry.WithCertFromFile("/path/to/internal-ca-1.pem"),
-		retry.WithCertFromFile("/path/to/internal-ca-2.pem"),
-		retry.WithCertFromURL("https://pki.company.com/certs/partner-ca.pem"),
-		retry.WithMaxRetries(3),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"https://internal.company.com/api/data",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	resp, err := client.Do(ctx, req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Connected with multiple certs: %d\n", resp.StatusCode)
-}
-
-// Example_withCertFromBytes demonstrates using an in-memory certificate
-func Example_withCertFromBytes() {
-	// Use a certificate loaded from memory (e.g., from configuration or embedded data)
-	certPEM := []byte(`-----BEGIN CERTIFICATE-----
-MIIBkTCB+wIJAKHHCgVZU7c7MA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl
-c3RjYTAeFw0yNDAxMDEwMDAwMDBaFw0yNTAxMDEwMDAwMDBaMBExDzANBgNVBAMM
-BnRlc3RjYTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAw6h0WqLjGcDmPlNb
-Nz3VPzQjGiLvNSBB+9CX6sqQ7KBwCcHiVJqTnG5KsLqkLJDl6pKN6gqVyPJ5J5qD
-AeLOCwHK7qKv5V7YwJpnGPGXPGxd2LQJYdZnqKTb9a1sKQqC8BZ+NfPnHZLU5wUc
-yWlJpLLqYMbKqW4VlGYVxXQcUGsCAwEAATANBgkqhkiG9w0BAQsFAAOBgQB7LNhL
-v8V8SvLZFdQxSJzTpKRq3BZQfPNXqVzQDXqYpL7KNQBzqO2dpPxZ3JqKk4lLGmGF
-zD7E7l9KQC3sM1xqMVCMKxqL1VHQH3YyWMJYqIlYQqFkLCBxL9VqFCZyLqGlLFLX
-nHyqB3LJ0L5+zLqQH9KYXKQz5Ly3VKVsKQqC8A==
------END CERTIFICATE-----`)
-
-	client, err := retry.NewClient(
-		retry.WithCertFromBytes(certPEM),
-		retry.WithMaxRetries(3),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"https://internal.company.com/api/data",
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	resp, err := client.Do(ctx, req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Connected with embedded cert: %d\n", resp.StatusCode)
-}
-
-// Example_withCertAndCustomHTTPClient demonstrates combining certificates with a custom HTTP client
-func Example_withCertAndCustomHTTPClient() {
-	// Create a custom HTTP client with specific settings
-	customHTTPClient := &http.Client{
-		Timeout: 10 * time.Second,
+	// Step 3: Create HTTP client with TLS config
+	httpClient := &http.Client{
 		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
+			TLSClientConfig: tlsConfig,
+		},
+		Timeout: 30 * time.Second,
+	}
+
+	// Step 4: Create retry client with pre-configured HTTP client
+	client, err := retry.NewClient(
+		retry.WithHTTPClient(httpClient),
+		retry.WithMaxRetries(3),
+		retry.WithJitter(true),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Step 5: Use the retry client normally
+	ctx := context.Background()
+	req, _ := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"https://internal.company.com/api",
+		nil,
+	)
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Status: %d\n", resp.StatusCode)
+}
+
+// Example_insecureTLS demonstrates how to skip TLS verification for testing.
+// WARNING: Only use this in development/testing environments!
+func Example_insecureTLS() {
+	// Create HTTP client with insecure TLS config
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // #nosec G402
+			},
 		},
 	}
 
-	// Add custom certificates to the custom client
-	// The certificates will be merged into the client's transport
 	client, err := retry.NewClient(
-		retry.WithHTTPClient(customHTTPClient),
-		retry.WithCertFromFile("/path/to/internal-ca.pem"),
-		retry.WithMaxRetries(3),
+		retry.WithHTTPClient(httpClient),
+		retry.WithMaxRetries(2),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
+	req, _ := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		"https://internal.company.com/api/data",
+		"https://self-signed.badssl.com/",
 		nil,
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	resp, err := client.Do(ctx, req)
 	if err != nil {
@@ -387,39 +306,5 @@ func Example_withCertAndCustomHTTPClient() {
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("Connected with custom client and certs: %d\n", resp.StatusCode)
-}
-
-// Example_withInsecureSkipVerify demonstrates skipping TLS certificate verification
-// WARNING: This should only be used in testing or development environments
-func Example_withInsecureSkipVerify() {
-	// Skip TLS certificate verification (useful for self-signed certs in testing)
-	// WARNING: This makes the client vulnerable to man-in-the-middle attacks
-	// Only use this in controlled testing/development environments
-	client, err := retry.NewClient(
-		retry.WithInsecureSkipVerify(),
-		retry.WithMaxRetries(3),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"https://localhost:8443/api/data", // Local development server with self-signed cert
-		nil,
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	resp, err := client.Do(ctx, req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Connected (skip verify): %d\n", resp.StatusCode)
+	fmt.Printf("Connected (insecure): %d\n", resp.StatusCode)
 }

@@ -23,11 +23,8 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithMaxRetryDelay(d time.Duration)`](#withmaxretrydelayd-timeduration)
     - [`WithRetryDelayMultiple(multiplier float64)`](#withretrydelaymultiplemultiplier-float64)
     - [`WithHTTPClient(httpClient *http.Client)`](#withhttpclienthttpclient-httpclient)
+    - [Custom TLS Configuration](#custom-tls-configuration)
     - [`WithRetryableChecker(checker RetryableChecker)`](#withretryablecheckerchecker-retryablechecker)
-    - [`WithCertFromFile(certPath string)`](#withcertfromfilecertpath-string)
-    - [`WithCertFromBytes(certPEM []byte)`](#withcertfrombytescertpem-byte)
-    - [`WithCertFromURL(certURL string)`](#withcertfromurlcerturl-string)
-    - [`WithInsecureSkipVerify()`](#withinsecureskipverify)
     - [`WithJitter(enabled bool)`](#withjitterenabled-bool)
     - [`WithRespectRetryAfter(enabled bool)`](#withrespectretryafterenabled-bool)
     - [`WithOnRetry(fn OnRetryFunc)`](#withonretryfn-onretryfunc)
@@ -39,10 +36,6 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
     - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
     - [Custom Retry Logic for Authentication Tokens](#custom-retry-logic-for-authentication-tokens)
-    - [Connecting to Internal Services with Custom Certificates](#connecting-to-internal-services-with-custom-certificates)
-    - [Multiple Certificate Sources](#multiple-certificate-sources)
-    - [Custom HTTP Client with Certificates](#custom-http-client-with-certificates)
-    - [Skip SSL Verification for Testing](#skip-ssl-verification-for-testing)
     - [Retry with Jitter to Prevent Thundering Herd](#retry-with-jitter-to-prevent-thundering-herd)
     - [Respect Rate Limiting with Retry-After Header](#respect-rate-limiting-with-retry-after-header)
     - [Observability with Retry Callbacks](#observability-with-retry-callbacks)
@@ -61,8 +54,6 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Context Support**: Respects context cancellation and timeouts
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
 - **Resource Safe**: Automatically closes response bodies before retries to prevent leaks
-- **Enterprise Certificate Support**: Load custom TLS certificates from files, memory, or URLs for internal/self-signed CAs
-- **Flexible TLS Configuration**: Optional SSL verification skipping for testing/development environments
 - **Zero Dependencies**: Uses only Go standard library
 
 ## Installation
@@ -192,6 +183,60 @@ if err != nil {
 }
 ```
 
+### Custom TLS Configuration
+
+For services requiring custom TLS certificates (e.g., self-signed certificates, internal CAs),
+configure the TLS settings on your `http.Client` before passing it to the retry client.
+
+#### Example: Custom CA Certificate
+
+```go
+// Load custom certificate
+certPool, _ := x509.SystemCertPool()
+certPEM, _ := os.ReadFile("/path/to/internal-ca.pem")
+certPool.AppendCertsFromPEM(certPEM)
+
+// Create HTTP client with TLS config
+httpClient := &http.Client{
+    Transport: &http.Transport{
+        TLSClientConfig: &tls.Config{
+            RootCAs:    certPool,
+            MinVersion: tls.VersionTLS12,
+        },
+    },
+}
+
+// Create retry client
+client, _ := retry.NewClient(
+    retry.WithHTTPClient(httpClient),
+    retry.WithMaxRetries(3),
+)
+```
+
+#### Example: Skip TLS Verification (Testing Only)
+
+```go
+// WARNING: Only for development/testing!
+httpClient := &http.Client{
+    Transport: &http.Transport{
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: true,
+        },
+    },
+}
+
+client, _ := retry.NewClient(retry.WithHTTPClient(httpClient))
+```
+
+**Why External TLS Configuration?**
+
+- **Single Responsibility**: The retry client focuses solely on retry logic
+- **Full Control**: You manage HTTP client settings (timeouts, connection pooling, TLS)
+- **Standard Practice**: Use Go's standard `crypto/tls` package directly
+- **Better Composability**: Works with any HTTP client configuration
+
+See `example_test.go` for complete working examples.
+
 ### `WithRetryableChecker(checker RetryableChecker)`
 
 Provides custom logic for determining which errors should trigger retries.
@@ -215,60 +260,6 @@ if err != nil {
     log.Fatal(err)
 }
 ```
-
-### `WithCertFromFile(certPath string)`
-
-Loads a PEM-encoded certificate from a file path and adds it to the trusted certificate pool.
-
-```go
-client, err := retry.NewClient(
-    retry.WithCertFromFile("/path/to/internal-ca.pem"),
-)
-```
-
-### `WithCertFromBytes(certPEM []byte)`
-
-Loads a PEM-encoded certificate from memory and adds it to the trusted certificate pool.
-
-```go
-certPEM := []byte(`-----BEGIN CERTIFICATE-----
-...
------END CERTIFICATE-----`)
-
-client, err := retry.NewClient(
-    retry.WithCertFromBytes(certPEM),
-)
-```
-
-### `WithCertFromURL(certURL string)`
-
-Downloads a PEM-encoded certificate from a URL and adds it to the trusted certificate pool. The download has a fixed timeout of 30 seconds.
-
-```go
-client, err := retry.NewClient(
-    retry.WithCertFromURL("https://pki.company.com/certs/internal-ca.pem"),
-)
-```
-
-**Note**: Custom certificates are merged with the system certificate pool, allowing connections to both public and internal services. Certificates work seamlessly with both default and custom HTTP clients.
-
-### `WithInsecureSkipVerify()`
-
-Disables TLS certificate verification. **WARNING**: This makes the client vulnerable to man-in-the-middle attacks and should only be used in testing or development environments.
-
-```go
-client, err := retry.NewClient(
-    retry.WithInsecureSkipVerify(),
-)
-```
-
-**Security Notice**: Only use this option in controlled environments such as:
-
-- Local development with self-signed certificates
-- Testing environments
-- CI/CD pipelines
-
-For production environments with self-signed certificates, prefer using `WithCertFromFile`, `WithCertFromBytes`, or `WithCertFromURL` to explicitly trust specific certificates.
 
 ### `WithJitter(enabled bool)`
 
@@ -441,95 +432,6 @@ if err != nil {
 }
 ```
 
-### Connecting to Internal Services with Custom Certificates
-
-Load custom certificates to connect to services with self-signed or internal CA certificates:
-
-```go
-// Load certificate from file
-client, err := retry.NewClient(
-    retry.WithCertFromFile("/path/to/internal-ca.pem"),
-    retry.WithMaxRetries(3),
-)
-if err != nil {
-    log.Fatal(err)
-}
-
-ctx := context.Background()
-req, _ := http.NewRequest(http.MethodGet, "https://internal.company.com/api/data", nil)
-resp, err := client.Do(ctx, req)
-if err != nil {
-    log.Fatal(err)
-}
-defer resp.Body.Close()
-```
-
-### Multiple Certificate Sources
-
-Combine certificates from multiple sources:
-
-```go
-client, err := retry.NewClient(
-    retry.WithCertFromFile("/path/to/ca1.pem"),
-    retry.WithCertFromFile("/path/to/ca2.pem"),
-    retry.WithCertFromURL("https://pki.company.com/ca3.pem"),
-    retry.WithMaxRetries(3),
-)
-```
-
-### Custom HTTP Client with Certificates
-
-Certificates are automatically merged into your custom HTTP client:
-
-```go
-// Create custom HTTP client with specific settings
-customHTTPClient := &http.Client{
-    Timeout: 10 * time.Second,
-    Transport: &http.Transport{
-        MaxIdleConns:        100,
-        MaxIdleConnsPerHost: 10,
-        IdleConnTimeout:     90 * time.Second,
-    },
-}
-
-// Add certificates to the custom client
-// The library will merge the certificates into the client's transport
-client, err := retry.NewClient(
-    retry.WithHTTPClient(customHTTPClient),
-    retry.WithCertFromFile("/path/to/internal-ca.pem"),
-    retry.WithMaxRetries(3),
-)
-```
-
-### Skip SSL Verification for Testing
-
-For testing or development environments, you can skip SSL certificate verification:
-
-```go
-// WARNING: Only use this in testing/development environments!
-// This makes your client vulnerable to man-in-the-middle attacks
-client, err := retry.NewClient(
-    retry.WithInsecureSkipVerify(),
-    retry.WithMaxRetries(3),
-)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Connect to a server with self-signed certificate
-ctx := context.Background()
-req, _ := http.NewRequest(http.MethodGet, "https://localhost:8443/api/data", nil)
-resp, err := client.Do(ctx, req)
-if err != nil {
-    log.Fatal(err)
-}
-defer resp.Body.Close()
-```
-
-**Important Security Note**: Never use `WithInsecureSkipVerify()` in production. For production environments with self-signed certificates, use `WithCertFromFile()`, `WithCertFromBytes()`, or `WithCertFromURL()` to explicitly trust specific certificates.
-
-For more details on certificate usage, see [CERT_USAGE.md](CERT_USAGE.md).
-
 ### Retry with Jitter to Prevent Thundering Herd
 
 ```go
@@ -695,9 +597,9 @@ go test -v -cover ./...
 
 - **Functional Options Pattern**: Provides clean, flexible API for configuration
 - **Sensible Defaults**: Works out of the box for most use cases
+- **Separation of Concerns**: HTTP client configuration (including TLS) is the user's responsibility; retry logic is ours
+- **Single Responsibility**: Focus exclusively on retry behavior, not HTTP client building
 - **Context-Aware**: Respects cancellation and timeouts
 - **Resource Safe**: Prevents response body leaks by closing them before retries
 - **Request Cloning**: Clones requests for each retry to handle consumed request bodies
-- **Certificate Merging**: Custom certificates are merged with system certificates, not replacing them
-- **Transport Safety**: Safely clones and modifies HTTP transports without affecting shared instances
 - **Zero Dependencies**: Uses only standard library

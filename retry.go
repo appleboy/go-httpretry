@@ -2,13 +2,9 @@ package retry
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
@@ -29,9 +25,7 @@ type Client struct {
 	retryDelayMultiple float64
 	httpClient         *http.Client
 	retryableChecker   RetryableChecker
-	customCertsPEM     [][]byte // Store PEM bytes to merge with system certs later
-	insecureSkipVerify bool     // Skip TLS certificate verification
-	jitterEnabled      bool     // Add random jitter to retry delays
+	jitterEnabled      bool // Add random jitter to retry delays
 	onRetryFunc        OnRetryFunc
 	respectRetryAfter  bool // Respect Retry-After header from responses
 	err                error
@@ -137,120 +131,8 @@ func WithRespectRetryAfter(enabled bool) Option {
 	}
 }
 
-// WithInsecureSkipVerify disables TLS certificate verification.
-// WARNING: This makes the client vulnerable to man-in-the-middle attacks.
-// Only use this for testing or development environments.
-func WithInsecureSkipVerify() Option {
-	return func(c *Client) {
-		c.insecureSkipVerify = true
-	}
-}
-
-// WithCertFromFile loads a PEM-encoded certificate from a file path
-// and adds it to the client's trusted certificate pool.
-// This is useful for connecting to servers with self-signed or internal CA certificates.
-func WithCertFromFile(certPath string) Option {
-	return func(c *Client) {
-		if c.err != nil {
-			return // Previous error, skip
-		}
-
-		certPEM, err := os.ReadFile(certPath)
-		if err != nil {
-			c.err = fmt.Errorf("failed to read certificate file %s: %w", certPath, err)
-			return
-		}
-
-		// Validate PEM format by trying to append to a test pool
-		testPool := x509.NewCertPool()
-		if !testPool.AppendCertsFromPEM(certPEM) {
-			c.err = fmt.Errorf("failed to parse certificate from %s: invalid PEM format", certPath)
-			return
-		}
-
-		// Store PEM bytes for later merging with system certs
-		c.customCertsPEM = append(c.customCertsPEM, certPEM)
-	}
-}
-
-// WithCertFromBytes loads a PEM-encoded certificate from memory
-// and adds it to the client's trusted certificate pool.
-// This is useful for certificates loaded from configuration or embedded in the application.
-func WithCertFromBytes(certPEM []byte) Option {
-	return func(c *Client) {
-		if c.err != nil {
-			return // Previous error, skip
-		}
-
-		if len(certPEM) == 0 {
-			c.err = fmt.Errorf("certificate data is empty")
-			return
-		}
-
-		// Validate PEM format by trying to append to a test pool
-		testPool := x509.NewCertPool()
-		if !testPool.AppendCertsFromPEM(certPEM) {
-			c.err = fmt.Errorf("failed to parse certificate: invalid PEM format")
-			return
-		}
-
-		// Store PEM bytes for later merging with system certs
-		c.customCertsPEM = append(c.customCertsPEM, certPEM)
-	}
-}
-
-// WithCertFromURL downloads a PEM-encoded certificate from a URL
-// and adds it to the client's trusted certificate pool.
-// The download has a fixed timeout of 30 seconds.
-// This is useful for dynamically loading certificates from certificate servers.
-func WithCertFromURL(certURL string) Option {
-	return func(c *Client) {
-		if c.err != nil {
-			return // Previous error, skip
-		}
-
-		// Create client with 30-second timeout for downloading certificate
-		httpClient := &http.Client{Timeout: 30 * time.Second}
-
-		// Create request with context for timeout and cancellation support
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, certURL, nil)
-		if err != nil {
-			c.err = fmt.Errorf("failed to create request for %s: %w", certURL, err)
-			return
-		}
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			c.err = fmt.Errorf("failed to download certificate from %s: %w", certURL, err)
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			c.err = fmt.Errorf(
-				"failed to download certificate from %s: HTTP %d",
-				certURL,
-				resp.StatusCode,
-			)
-			return
-		}
-
-		certPEM, err := io.ReadAll(resp.Body)
-		if err != nil {
-			c.err = fmt.Errorf("failed to read certificate from %s: %w", certURL, err)
-			return
-		}
-
-		// Reuse WithCertFromBytes to parse and add
-		WithCertFromBytes(certPEM)(c)
-	}
-}
-
 // NewClient creates a new retry-enabled HTTP client with the given options.
-// Returns an error if certificate loading fails or if any option encounters an error.
+// Returns an error if any option encounters an error.
 func NewClient(opts ...Option) (*Client, error) {
 	c := &Client{
 		maxRetries:         defaultMaxRetries,
@@ -269,81 +151,6 @@ func NewClient(opts ...Option) (*Client, error) {
 	// Check if any option returned an error
 	if c.err != nil {
 		return nil, c.err
-	}
-
-	// Apply custom TLS configuration if needed
-	if len(c.customCertsPEM) > 0 || c.insecureSkipVerify {
-		var rootCAs *x509.CertPool
-
-		// Only set up custom cert pool if certificates are provided
-		if len(c.customCertsPEM) > 0 {
-			// Start with system cert pool, fall back to empty pool if unavailable
-			var err error
-			rootCAs, err = x509.SystemCertPool()
-			if rootCAs == nil || err != nil {
-				rootCAs = x509.NewCertPool()
-			}
-
-			// Add all custom certificates to the system cert pool
-			for _, certPEM := range c.customCertsPEM {
-				rootCAs.AppendCertsFromPEM(certPEM)
-			}
-		}
-
-		// Create TLS config with combined cert pool and InsecureSkipVerify
-		tlsConfig := &tls.Config{
-			RootCAs: rootCAs,
-			// #nosec G402 - InsecureSkipVerify is intentionally configurable via WithInsecureSkipVerify()
-			InsecureSkipVerify: c.insecureSkipVerify,
-			MinVersion:         tls.VersionTLS12, // Require TLS 1.2 or higher for security
-		}
-
-		// Handle different httpClient scenarios
-		if c.httpClient == http.DefaultClient {
-			// User didn't provide custom client, create new one with TLS config
-			transport := &http.Transport{
-				TLSClientConfig: tlsConfig,
-			}
-			c.httpClient = &http.Client{
-				Transport: transport,
-			}
-		} else {
-			// User provided custom client, merge TLS config into its transport
-			switch t := c.httpClient.Transport.(type) {
-			case *http.Transport:
-				// Clone the existing transport to avoid modifying shared transport
-				newTransport := t.Clone()
-				if newTransport.TLSClientConfig == nil {
-					newTransport.TLSClientConfig = tlsConfig
-				} else {
-					// Merge with existing TLS config
-					if len(c.customCertsPEM) > 0 {
-						newTransport.TLSClientConfig.RootCAs = rootCAs
-					}
-					if c.insecureSkipVerify {
-						newTransport.TLSClientConfig.InsecureSkipVerify = true
-					}
-					if newTransport.TLSClientConfig.MinVersion == 0 {
-						newTransport.TLSClientConfig.MinVersion = tls.VersionTLS12
-					}
-				}
-				c.httpClient.Transport = newTransport
-			case nil:
-				// No transport set, create new one
-				c.httpClient.Transport = &http.Transport{
-					TLSClientConfig: tlsConfig,
-				}
-			default:
-				// Custom transport type, can't modify - this is a limitation
-				// User should use WithCertFrom* before WithHTTPClient to avoid this
-				c.err = fmt.Errorf(
-					"cannot apply certificates to custom transport type %T; "+
-						"use certificate options before WithHTTPClient or provide transport with *http.Transport",
-					t,
-				)
-				return nil, c.err
-			}
-		}
 	}
 
 	return c, nil
