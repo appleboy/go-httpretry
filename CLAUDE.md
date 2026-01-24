@@ -59,7 +59,29 @@ Implemented in the main retry loop (retry.go:124-174):
 
 ## Testing
 
-**Run all tests:**
+**IMPORTANT: All changes MUST pass both `make test` and `make lint` before committing.**
+
+**Run all tests (recommended):**
+
+```bash
+make test
+```
+
+This runs tests with coverage and generates `coverage.txt`.
+
+**Run linting:**
+
+```bash
+make lint
+```
+
+**Run both (required before commit):**
+
+```bash
+make test && make lint
+```
+
+**Run tests manually:**
 
 ```bash
 go test -v ./...
@@ -77,15 +99,39 @@ go test -v -cover ./...
 go test -v -run TestName
 ```
 
-**Note:** The CI workflow (.github/workflows/testing.yml:74) references `make test`, but there is currently no Makefile in the repository. Tests are expected to run via standard `go test` commands.
+### Test Coverage Requirements
+
+- **Every code change MUST include corresponding tests**
+- **New functions require test cases** covering:
+  - Happy path (normal operation)
+  - Error cases (invalid inputs, network failures)
+  - Edge cases (nil values, timeouts, context cancellation)
+- **Bug fixes MUST include a regression test** that reproduces the bug before the fix
 
 ## Development Commands
 
 **Linting:**
-The project uses golangci-lint in CI. Run locally:
+
+```bash
+make lint
+```
+
+Or run golangci-lint directly:
 
 ```bash
 golangci-lint run --verbose
+```
+
+**Format code:**
+
+```bash
+make fmt
+```
+
+**Clean build artifacts:**
+
+```bash
+rm -rf coverage.txt
 ```
 
 **No build required** - this is a library package, not a binary.
@@ -104,3 +150,8 @@ golangci-lint run --verbose
 3. **Request body handling** - Always clone requests before retry (request bodies may be consumed)
 4. **Resource safety** - Close response bodies before retrying to prevent leaks
 5. **Context respect** - Never ignore context cancellation in the retry loop
+6. **Testing is mandatory** - All changes MUST:
+   - Pass `make test` and `make lint` before committing
+   - Include corresponding test cases for new functionality
+   - Include regression tests for bug fixes
+   - Maintain or improve test coverage
