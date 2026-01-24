@@ -44,6 +44,8 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
       - [Example: Skip TLS Verification (Testing Only)](#example-skip-tls-verification-testing-only)
   - [Testing](#testing)
   - [Design Principles](#design-principles)
+  - [License](#license)
+  - [Author](#author)
 
 ## Features
 
@@ -605,3 +607,18 @@ go test -v -cover ./...
 - **Resource Safe**: Prevents response body leaks by closing them before retries
 - **Request Cloning**: Clones requests for each retry to handle consumed request bodies
 - **Zero Dependencies**: Uses only standard library
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 Bo-Yi Wu
+
+## Author
+
+- GitHub: [@appleboy](https://github.com/appleboy)
+- Website: [https://blog.wu-boy.com](https://blog.wu-boy.com)
+
+Support this project:
+
+[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.me/appleboy46)
