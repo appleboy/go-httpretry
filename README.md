@@ -23,7 +23,6 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithMaxRetryDelay(d time.Duration)`](#withmaxretrydelayd-timeduration)
     - [`WithRetryDelayMultiple(multiplier float64)`](#withretrydelaymultiplemultiplier-float64)
     - [`WithHTTPClient(httpClient *http.Client)`](#withhttpclienthttpclient-httpclient)
-    - [Custom TLS Configuration](#custom-tls-configuration)
     - [`WithRetryableChecker(checker RetryableChecker)`](#withretryablecheckerchecker-retryablechecker)
     - [`WithJitter(enabled bool)`](#withjitterenabled-bool)
     - [`WithRespectRetryAfter(enabled bool)`](#withrespectretryafterenabled-bool)
@@ -40,6 +39,9 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Respect Rate Limiting with Retry-After Header](#respect-rate-limiting-with-retry-after-header)
     - [Observability with Retry Callbacks](#observability-with-retry-callbacks)
     - [Production-Ready Configuration](#production-ready-configuration)
+    - [Custom TLS Configuration](#custom-tls-configuration)
+      - [Example: Custom CA Certificate](#example-custom-ca-certificate)
+      - [Example: Skip TLS Verification (Testing Only)](#example-skip-tls-verification-testing-only)
   - [Testing](#testing)
   - [Design Principles](#design-principles)
 
@@ -182,60 +184,6 @@ if err != nil {
     log.Fatal(err)
 }
 ```
-
-### Custom TLS Configuration
-
-For services requiring custom TLS certificates (e.g., self-signed certificates, internal CAs),
-configure the TLS settings on your `http.Client` before passing it to the retry client.
-
-#### Example: Custom CA Certificate
-
-```go
-// Load custom certificate
-certPool, _ := x509.SystemCertPool()
-certPEM, _ := os.ReadFile("/path/to/internal-ca.pem")
-certPool.AppendCertsFromPEM(certPEM)
-
-// Create HTTP client with TLS config
-httpClient := &http.Client{
-    Transport: &http.Transport{
-        TLSClientConfig: &tls.Config{
-            RootCAs:    certPool,
-            MinVersion: tls.VersionTLS12,
-        },
-    },
-}
-
-// Create retry client
-client, _ := retry.NewClient(
-    retry.WithHTTPClient(httpClient),
-    retry.WithMaxRetries(3),
-)
-```
-
-#### Example: Skip TLS Verification (Testing Only)
-
-```go
-// WARNING: Only for development/testing!
-httpClient := &http.Client{
-    Transport: &http.Transport{
-        TLSClientConfig: &tls.Config{
-            InsecureSkipVerify: true,
-        },
-    },
-}
-
-client, _ := retry.NewClient(retry.WithHTTPClient(httpClient))
-```
-
-**Why External TLS Configuration?**
-
-- **Single Responsibility**: The retry client focuses solely on retry logic
-- **Full Control**: You manage HTTP client settings (timeouts, connection pooling, TLS)
-- **Standard Practice**: Use Go's standard `crypto/tls` package directly
-- **Better Composability**: Works with any HTTP client configuration
-
-See `example_test.go` for complete working examples.
 
 ### `WithRetryableChecker(checker RetryableChecker)`
 
@@ -578,6 +526,60 @@ if err != nil {
     log.Fatal(err)
 }
 ```
+
+### Custom TLS Configuration
+
+For services requiring custom TLS certificates (e.g., self-signed certificates, internal CAs),
+configure the TLS settings on your `http.Client` before passing it to the retry client.
+
+#### Example: Custom CA Certificate
+
+```go
+// Load custom certificate
+certPool, _ := x509.SystemCertPool()
+certPEM, _ := os.ReadFile("/path/to/internal-ca.pem")
+certPool.AppendCertsFromPEM(certPEM)
+
+// Create HTTP client with TLS config
+httpClient := &http.Client{
+    Transport: &http.Transport{
+        TLSClientConfig: &tls.Config{
+            RootCAs:    certPool,
+            MinVersion: tls.VersionTLS12,
+        },
+    },
+}
+
+// Create retry client
+client, _ := retry.NewClient(
+    retry.WithHTTPClient(httpClient),
+    retry.WithMaxRetries(3),
+)
+```
+
+#### Example: Skip TLS Verification (Testing Only)
+
+```go
+// WARNING: Only for development/testing!
+httpClient := &http.Client{
+    Transport: &http.Transport{
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: true,
+        },
+    },
+}
+
+client, _ := retry.NewClient(retry.WithHTTPClient(httpClient))
+```
+
+**Why External TLS Configuration?**
+
+- **Single Responsibility**: The retry client focuses solely on retry logic
+- **Full Control**: You manage HTTP client settings (timeouts, connection pooling, TLS)
+- **Standard Practice**: Use Go's standard `crypto/tls` package directly
+- **Better Composability**: Works with any HTTP client configuration
+
+See `example_test.go` for complete working examples.
 
 ## Testing
 
