@@ -142,6 +142,7 @@ func NewClient(opts ...Option) (*Client, error) {
 		httpClient:         http.DefaultClient,
 		retryableChecker:   DefaultRetryableChecker,
 		jitterEnabled:      true, // Enable jitter by default to prevent thundering herd
+		respectRetryAfter:  true, // Respect HTTP standard Retry-After header by default
 	}
 
 	for _, opt := range opts {

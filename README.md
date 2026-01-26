@@ -96,6 +96,7 @@ func main() {
     // - 10 second max delay
     // - 2.0x exponential multiplier
     // - Jitter enabled (±25% randomization)
+    // - Retry-After header respected (HTTP standard compliant)
     client, err := retry.NewClient()
     if err != nil {
         log.Fatal(err)
@@ -227,7 +228,7 @@ client, err := retry.NewClient(
 
 ### `WithRespectRetryAfter(enabled bool)`
 
-Enables respecting the `Retry-After` header from HTTP responses. When enabled, the client will use the server-provided retry delay instead of exponential backoff.
+Controls whether to respect the `Retry-After` header from HTTP responses. **This is enabled by default** to comply with HTTP standards (RFC 7231). When enabled, the client will use the server-provided retry delay instead of exponential backoff.
 
 The `Retry-After` header can be:
 
@@ -235,13 +236,15 @@ The `Retry-After` header can be:
 - **HTTP-date**: An RFC1123 date (e.g., `Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`)
 
 ```go
+// Retry-After is enabled by default, but you can explicitly disable it if needed
+// (not recommended in most cases)
 client, err := retry.NewClient(
-    retry.WithRespectRetryAfter(true),
+    retry.WithRespectRetryAfter(false), // Ignore Retry-After header
     retry.WithMaxRetries(5),
 )
 ```
 
-**Use Case**: Essential for proper rate limiting compliance. When a server responds with 429 (Too Many Requests) or 503 (Service Unavailable), it often includes a `Retry-After` header indicating when to retry.
+**Use Case**: Essential for proper rate limiting compliance. When a server responds with 429 (Too Many Requests) or 503 (Service Unavailable), it often includes a `Retry-After` header indicating when to retry. Respecting this header is the correct behavior for a well-behaved HTTP client.
 
 ### `WithOnRetry(fn OnRetryFunc)`
 
@@ -408,9 +411,9 @@ defer resp.Body.Close()
 ### Respect Rate Limiting with Retry-After Header
 
 ```go
-// Enable Retry-After header support for proper rate limiting
+// Retry-After header support is enabled by default for proper rate limiting
+// The client will automatically respect the server's Retry-After header
 client, err := retry.NewClient(
-    retry.WithRespectRetryAfter(true),
     retry.WithMaxRetries(5),
     retry.WithInitialRetryDelay(1*time.Second), // Fallback if no Retry-After header
 )
@@ -487,11 +490,10 @@ client, err := retry.NewClient(
     retry.WithMaxRetryDelay(30*time.Second),
     retry.WithRetryDelayMultiple(2.0),
 
-    // Note: Jitter is enabled by default to prevent thundering herd
-    // No need to call WithJitter(true) unless you want to explicitly disable it
-
-    // Respect server's rate limiting
-    retry.WithRespectRetryAfter(true),
+    // Note: Jitter and Retry-After are enabled by default
+    // - Jitter prevents thundering herd problem
+    // - Retry-After respects HTTP standard for rate limiting
+    // No need to call WithJitter(true) or WithRespectRetryAfter(true)
 
     // Observability
     retry.WithOnRetry(func(info retry.RetryInfo) {

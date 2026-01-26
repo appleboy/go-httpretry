@@ -40,13 +40,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Defaults
 
-The library ships with sensible defaults (see constants in retry.go:17-22 and NewClient in retry.go:254-263):
+The library ships with sensible defaults (see constants in retry.go:17-22 and NewClient in retry.go:136-146):
 
 - Max retries: 3
 - Initial delay: 1 second
 - Max delay: 10 seconds
 - Backoff multiplier: 2.0x
 - Jitter: Enabled (±25% randomization to prevent thundering herd)
+- Retry-After: Enabled (respects HTTP Retry-After header per RFC 7231)
 - Retry checker: `DefaultRetryableChecker` (retries on network errors, 5xx, and 429)
 
 ### Exponential Backoff
