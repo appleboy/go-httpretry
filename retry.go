@@ -27,7 +27,8 @@ type Client struct {
 	retryableChecker   RetryableChecker
 	jitterEnabled      bool // Add random jitter to retry delays
 	onRetryFunc        OnRetryFunc
-	respectRetryAfter  bool // Respect Retry-After header from responses
+	respectRetryAfter  bool          // Respect Retry-After header from responses
+	perAttemptTimeout  time.Duration // Timeout for each individual attempt (0 = no per-attempt timeout)
 	err                error
 }
 
@@ -128,6 +129,18 @@ func WithOnRetry(fn OnRetryFunc) Option {
 func WithRespectRetryAfter(enabled bool) Option {
 	return func(c *Client) {
 		c.respectRetryAfter = enabled
+	}
+}
+
+// WithPerAttemptTimeout sets a timeout for each individual retry attempt.
+// This prevents a single slow request from consuming all available retry time.
+// If set to 0 (default), no per-attempt timeout is applied.
+// The per-attempt timeout is independent of the overall context timeout.
+func WithPerAttemptTimeout(d time.Duration) Option {
+	return func(c *Client) {
+		if d >= 0 {
+			c.perAttemptTimeout = d
+		}
 	}
 }
 
@@ -281,10 +294,22 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			}
 		}
 
+		// Create a per-attempt context with timeout if configured
+		attemptCtx := ctx
+		var cancelAttempt context.CancelFunc
+		if c.perAttemptTimeout > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(ctx, c.perAttemptTimeout)
+		}
+
 		// Clone the request for retry (important: body might be consumed)
-		reqClone := req.Clone(ctx)
+		reqClone := req.Clone(attemptCtx)
 
 		resp, lastErr = c.httpClient.Do(reqClone)
+
+		// Cancel the per-attempt context to release resources
+		if cancelAttempt != nil {
+			cancelAttempt()
+		}
 
 		// Check if we should retry
 		if !c.retryableChecker(lastErr, resp) {

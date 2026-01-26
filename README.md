@@ -26,6 +26,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithRetryableChecker(checker RetryableChecker)`](#withretryablecheckerchecker-retryablechecker)
     - [`WithJitter(enabled bool)`](#withjitterenabled-bool)
     - [`WithRespectRetryAfter(enabled bool)`](#withrespectretryafterenabled-bool)
+    - [`WithPerAttemptTimeout(d time.Duration)`](#withperattempttimeoutd-timeduration)
     - [`WithOnRetry(fn OnRetryFunc)`](#withonretryfn-onretryfunc)
   - [Default Retry Behavior](#default-retry-behavior)
   - [Exponential Backoff](#exponential-backoff)
@@ -35,6 +36,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
     - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
     - [Custom Retry Logic for Authentication Tokens](#custom-retry-logic-for-authentication-tokens)
+    - [Per-Attempt Timeout for Slow Requests](#per-attempt-timeout-for-slow-requests)
     - [Retry with Jitter to Prevent Thundering Herd](#retry-with-jitter-to-prevent-thundering-herd)
     - [Respect Rate Limiting with Retry-After Header](#respect-rate-limiting-with-retry-after-header)
     - [Observability with Retry Callbacks](#observability-with-retry-callbacks)
@@ -246,6 +248,42 @@ client, err := retry.NewClient(
 
 **Use Case**: Essential for proper rate limiting compliance. When a server responds with 429 (Too Many Requests) or 503 (Service Unavailable), it often includes a `Retry-After` header indicating when to retry. Respecting this header is the correct behavior for a well-behaved HTTP client.
 
+### `WithPerAttemptTimeout(d time.Duration)`
+
+Sets a timeout for each individual retry attempt. This prevents a single slow request from consuming all available retry time. By default, no per-attempt timeout is set (0), and only the overall context timeout applies.
+
+```go
+client, err := retry.NewClient(
+    retry.WithPerAttemptTimeout(5*time.Second), // Each attempt times out after 5s
+    retry.WithMaxRetries(3),
+    retry.WithInitialRetryDelay(1*time.Second),
+)
+```
+
+**Use Case**: Critical for preventing slow individual requests from exhausting retry budgets. For example:
+
+- If a request takes 30 seconds to timeout naturally, with 3 retries, you could wait 90 seconds
+- With `WithPerAttemptTimeout(5*time.Second)`, each attempt fails faster, giving you more useful retry opportunities
+- The per-attempt timeout works independently from the overall context timeout
+- When an attempt times out, it's treated as a retryable error
+
+**Example scenario:**
+
+```go
+// Overall timeout: 30 seconds
+// Per-attempt timeout: 5 seconds
+// Max retries: 5
+// Result: Up to 6 attempts (initial + 5 retries) can be made within 30 seconds,
+// each taking at most 5 seconds
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+client, _ := retry.NewClient(
+    retry.WithPerAttemptTimeout(5*time.Second),
+    retry.WithMaxRetries(5),
+)
+```
+
 ### `WithOnRetry(fn OnRetryFunc)`
 
 Sets a callback function that will be called before each retry attempt. Useful for logging, metrics collection, or custom retry logic.
@@ -383,6 +421,36 @@ client, err := retry.NewClient(
 if err != nil {
     log.Fatal(err)
 }
+```
+
+### Per-Attempt Timeout for Slow Requests
+
+```go
+// Prevent slow individual requests from consuming all retry opportunities
+// Each attempt gets 3 seconds max, with overall context timeout of 15 seconds
+client, err := retry.NewClient(
+    retry.WithPerAttemptTimeout(3*time.Second),
+    retry.WithMaxRetries(4),
+    retry.WithInitialRetryDelay(500*time.Millisecond),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Set overall timeout for the entire operation
+ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+defer cancel()
+
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/slow-endpoint", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+// Result: Up to 5 attempts (initial + 4 retries) can be made
+// Each attempt fails fast after 3 seconds instead of hanging
+// This gives you more chances to succeed within the 15-second window
 ```
 
 ### Retry with Jitter to Prevent Thundering Herd
