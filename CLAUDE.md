@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Defaults
 
-The library ships with sensible defaults (see constants in retry.go:17-22 and NewClient in retry.go:136-146):
+The library ships with sensible defaults (see the default constants and the `NewClient` constructor in `retry.go`):
 
 - Max retries: 3
 - Initial delay: 1 second
