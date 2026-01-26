@@ -273,8 +273,10 @@ client, err := retry.NewClient(
 // Overall timeout: 30 seconds
 // Per-attempt timeout: 5 seconds
 // Max retries: 5
-// Result: Up to 6 attempts (initial + 5 retries) can be made within 30 seconds,
-// each taking at most 5 seconds
+// Result: Each attempt is limited to at most 5 seconds.
+// Note: With exponential backoff between retries, the actual number of
+//       attempts that fit within the 30s overall timeout depends on the
+//       configured backoff delays.
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 

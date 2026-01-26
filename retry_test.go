@@ -885,9 +885,10 @@ func TestWithPerAttemptTimeout_Triggered(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := attempts.Add(1)
 		if count < 3 {
-			// Simulate slow response that exceeds per-attempt timeout
-			time.Sleep(200 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
+			// Simulate a slow response by blocking until the request context is cancelled.
+			// This ensures the handler returns when the client times out, without relying on
+			// tight real-time sleeps that can be flaky under load.
+			<-r.Context().Done()
 			return
 		}
 		// Third attempt is fast
@@ -1013,5 +1014,45 @@ func TestWithPerAttemptTimeout_WithOverallTimeout(t *testing.T) {
 	attemptsCount := attempts.Load()
 	if attemptsCount < 2 || attemptsCount > 3 {
 		t.Errorf("expected 2-3 attempts before overall timeout, got %d", attemptsCount)
+	}
+}
+
+func TestWithPerAttemptTimeout_BodyReadableAfterSuccess(t *testing.T) {
+	responseBody := "test response body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithPerAttemptTimeout(1 * time.Second), // Per-attempt timeout enabled
+		WithMaxRetries(3),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify we can read the response body after the request completes
+	// This ensures the per-attempt context cancellation doesn't break the body
+	body := make([]byte, len(responseBody))
+	n, err := resp.Body.Read(body)
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if string(body[:n]) != responseBody {
+		t.Errorf("expected body %q, got %q", responseBody, string(body[:n]))
 	}
 }

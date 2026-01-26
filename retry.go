@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -227,6 +228,21 @@ func applyJitter(delay time.Duration) time.Duration {
 	return time.Duration(float64(delay) * jitter)
 }
 
+// cancelOnCloseBody wraps an io.ReadCloser and calls a cancel function when Close() is called.
+// This ensures the per-attempt context timeout is released when the response body is closed.
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseBody) Close() error {
+	err := c.ReadCloser.Close()
+	if c.cancel != nil {
+		c.cancel()
+	}
+	return err
+}
+
 // Do executes an HTTP request with automatic retry logic using exponential backoff
 func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
@@ -306,20 +322,28 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 
 		resp, lastErr = c.httpClient.Do(reqClone)
 
-		// Cancel the per-attempt context to release resources
-		if cancelAttempt != nil {
-			cancelAttempt()
-		}
-
 		// Check if we should retry
 		if !c.retryableChecker(lastErr, resp) {
 			// Success or non-retryable error
+			// Wrap the response body to cancel the per-attempt context when the body is closed
+			if cancelAttempt != nil && resp != nil && resp.Body != nil {
+				resp.Body = &cancelOnCloseBody{
+					ReadCloser: resp.Body,
+					cancel:     cancelAttempt,
+				}
+			} else if cancelAttempt != nil {
+				// No body to wrap, cancel immediately
+				cancelAttempt()
+			}
 			return resp, lastErr
 		}
 
-		// Close response body before retry to prevent resource leak
+		// Going to retry: close response body and cancel per-attempt context
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
+		}
+		if cancelAttempt != nil {
+			cancelAttempt()
 		}
 	}
 
