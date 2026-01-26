@@ -11,7 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - [Core Components](#core-components)
     - [Defaults](#defaults)
     - [Exponential Backoff](#exponential-backoff)
+    - [Per-Attempt Timeout](#per-attempt-timeout)
   - [Testing](#testing)
+    - [Test Coverage Requirements](#test-coverage-requirements)
   - [Development Commands](#development-commands)
   - [CI/CD](#cicd)
   - [Important Constraints](#important-constraints)
@@ -71,7 +73,8 @@ Optional feature that sets a timeout for each individual retry attempt:
 - **Interaction with retries**: When an attempt times out, it's treated as a retryable error (network error)
 
 **Example scenario:**
-```
+
+```txt
 Overall timeout: 30s
 Per-attempt timeout: 5s
 Max retries: 5
