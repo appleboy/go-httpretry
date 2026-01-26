@@ -42,6 +42,9 @@ func TestNewClient_Defaults(t *testing.T) {
 	if !client.jitterEnabled {
 		t.Error("expected jitterEnabled to be true by default")
 	}
+	if !client.respectRetryAfter {
+		t.Error("expected respectRetryAfter to be true by default")
+	}
 }
 
 func TestNewClient_WithOptions(t *testing.T) {
