@@ -837,3 +837,222 @@ func TestCombinedFeatures(t *testing.T) {
 		t.Errorf("expected second retry to have no Retry-After, got %v", retryInfos[1].RetryAfter)
 	}
 }
+
+func TestWithPerAttemptTimeout_Success(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		// Fast response - should not trigger per-attempt timeout
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithPerAttemptTimeout(1*time.Second), // Set per-attempt timeout
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Should only have 1 attempt (no retries)
+	if attempts.Load() != 1 {
+		t.Errorf("expected 1 attempt, got %d", attempts.Load())
+	}
+}
+
+func TestWithPerAttemptTimeout_Triggered(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		if count < 3 {
+			// Simulate a slow response by blocking until the request context is cancelled.
+			// This ensures the handler returns when the client times out, without relying on
+			// tight real-time sleeps that can be flaky under load.
+			<-r.Context().Done()
+			return
+		}
+		// Third attempt is fast
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithPerAttemptTimeout(100*time.Millisecond), // Short per-attempt timeout
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(3),
+		WithJitter(false),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Should have retried due to per-attempt timeout
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts (2 timeouts + 1 success), got %d", attempts.Load())
+	}
+}
+
+func TestWithPerAttemptTimeout_Disabled(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		// Slow response
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	// No per-attempt timeout set (default behavior)
+	client, err := NewClient(
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Set overall timeout longer than the slow response
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Should only have 1 attempt (no per-attempt timeout to trigger retry)
+	if attempts.Load() != 1 {
+		t.Errorf("expected 1 attempt, got %d", attempts.Load())
+	}
+}
+
+func TestWithPerAttemptTimeout_WithOverallTimeout(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		// Slow response
+		time.Sleep(150 * time.Millisecond)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithPerAttemptTimeout(100*time.Millisecond), // Per-attempt timeout
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(5),
+		WithJitter(false),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Overall timeout that should allow 2-3 attempts
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected context deadline error")
+	}
+
+	// Should have 2-3 attempts before overall timeout
+	attemptsCount := attempts.Load()
+	if attemptsCount < 2 || attemptsCount > 3 {
+		t.Errorf("expected 2-3 attempts before overall timeout, got %d", attemptsCount)
+	}
+}
+
+func TestWithPerAttemptTimeout_BodyReadableAfterSuccess(t *testing.T) {
+	responseBody := "test response body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithPerAttemptTimeout(1*time.Second), // Per-attempt timeout enabled
+		WithMaxRetries(3),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify we can read the response body after the request completes
+	// This ensures the per-attempt context cancellation doesn't break the body
+	body := make([]byte, len(responseBody))
+	n, err := resp.Body.Read(body)
+	if err != nil && err.Error() != "EOF" {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if string(body[:n]) != responseBody {
+		t.Errorf("expected body %q, got %q", responseBody, string(body[:n]))
+	}
+}

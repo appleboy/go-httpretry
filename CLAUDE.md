@@ -11,7 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - [Core Components](#core-components)
     - [Defaults](#defaults)
     - [Exponential Backoff](#exponential-backoff)
+    - [Per-Attempt Timeout](#per-attempt-timeout)
   - [Testing](#testing)
+    - [Test Coverage Requirements](#test-coverage-requirements)
   - [Development Commands](#development-commands)
   - [CI/CD](#cicd)
   - [Important Constraints](#important-constraints)
@@ -37,6 +39,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Request Cloning**: Each retry clones the request to handle consumed request bodies
 - **Resource Management**: Response bodies are explicitly closed before retries to prevent leaks
 - **Context-Aware**: Respects context cancellation/timeouts throughout retry loop
+- **Per-Attempt Timeout**: Optional timeout for each individual attempt to prevent slow requests from exhausting retry budget
 
 ### Defaults
 
@@ -48,15 +51,43 @@ The library ships with sensible defaults (see the default constants and the `New
 - Backoff multiplier: 2.0x
 - Jitter: Enabled (±25% randomization to prevent thundering herd)
 - Retry-After: Enabled (respects HTTP Retry-After header per RFC 7231)
+- Per-attempt timeout: 0 (disabled by default, only overall context timeout applies)
 - Retry checker: `DefaultRetryableChecker` (retries on network errors, 5xx, and 429)
 
 ### Exponential Backoff
 
-Implemented in the main retry loop (retry.go:124-174):
+Implemented in the main retry loop:
 
 1. First attempt is immediate
 2. Each retry waits: `delay = delay * multiplier` (capped at `maxRetryDelay`)
 3. Context cancellation is checked during wait periods
+
+### Per-Attempt Timeout
+
+Optional feature that sets a timeout for each individual retry attempt:
+
+- **When enabled** (`WithPerAttemptTimeout(duration)`): Creates a child context with timeout for each attempt
+- **When disabled** (default, `perAttemptTimeout = 0`): Only the overall context timeout applies
+- **Use case**: Prevents slow individual requests from consuming all retry opportunities
+- **Implementation**: Uses `context.WithTimeout()` for each attempt, properly cancels contexts to avoid goroutine leaks
+- **Interaction with retries**: When an attempt times out, it's treated as a retryable error (network error)
+
+**Example scenario:**
+
+```txt
+Overall timeout: 30s
+Per-attempt timeout: 5s
+Max retries: 5
+
+Without per-attempt timeout:
+- Attempt 1: hangs for 30s → timeout, no retries possible
+
+With per-attempt timeout:
+- Attempt 1: times out after 5s → retry
+- Attempt 2: times out after 5s → retry
+- Attempt 3: succeeds in 2s → success
+- Total time: ~12s (5s + delay + 5s + delay + 2s)
+```
 
 ## Testing
 

@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -27,7 +28,8 @@ type Client struct {
 	retryableChecker   RetryableChecker
 	jitterEnabled      bool // Add random jitter to retry delays
 	onRetryFunc        OnRetryFunc
-	respectRetryAfter  bool // Respect Retry-After header from responses
+	respectRetryAfter  bool          // Respect Retry-After header from responses
+	perAttemptTimeout  time.Duration // Timeout for each individual attempt (0 = no per-attempt timeout)
 	err                error
 }
 
@@ -131,6 +133,18 @@ func WithRespectRetryAfter(enabled bool) Option {
 	}
 }
 
+// WithPerAttemptTimeout sets a timeout for each individual retry attempt.
+// This prevents a single slow request from consuming all available retry time.
+// If set to 0 (default), no per-attempt timeout is applied.
+// The per-attempt timeout is independent of the overall context timeout.
+func WithPerAttemptTimeout(d time.Duration) Option {
+	return func(c *Client) {
+		if d >= 0 {
+			c.perAttemptTimeout = d
+		}
+	}
+}
+
 // NewClient creates a new retry-enabled HTTP client with the given options.
 // Returns an error if any option encounters an error.
 func NewClient(opts ...Option) (*Client, error) {
@@ -214,6 +228,21 @@ func applyJitter(delay time.Duration) time.Duration {
 	return time.Duration(float64(delay) * jitter)
 }
 
+// cancelOnCloseBody wraps an io.ReadCloser and calls a cancel function when Close() is called.
+// This ensures the per-attempt context timeout is released when the response body is closed.
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseBody) Close() error {
+	err := c.ReadCloser.Close()
+	if c.cancel != nil {
+		c.cancel()
+	}
+	return err
+}
+
 // Do executes an HTTP request with automatic retry logic using exponential backoff
 func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
@@ -281,20 +310,40 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			}
 		}
 
+		// Create a per-attempt context with timeout if configured
+		attemptCtx := ctx
+		var cancelAttempt context.CancelFunc
+		if c.perAttemptTimeout > 0 {
+			attemptCtx, cancelAttempt = context.WithTimeout(ctx, c.perAttemptTimeout)
+		}
+
 		// Clone the request for retry (important: body might be consumed)
-		reqClone := req.Clone(ctx)
+		reqClone := req.Clone(attemptCtx)
 
 		resp, lastErr = c.httpClient.Do(reqClone)
 
 		// Check if we should retry
 		if !c.retryableChecker(lastErr, resp) {
 			// Success or non-retryable error
+			// Wrap the response body to cancel the per-attempt context when the body is closed
+			if cancelAttempt != nil && resp != nil && resp.Body != nil {
+				resp.Body = &cancelOnCloseBody{
+					ReadCloser: resp.Body,
+					cancel:     cancelAttempt,
+				}
+			} else if cancelAttempt != nil {
+				// No body to wrap, cancel immediately
+				cancelAttempt()
+			}
 			return resp, lastErr
 		}
 
-		// Close response body before retry to prevent resource leak
+		// Going to retry: close response body and cancel per-attempt context
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
+		}
+		if cancelAttempt != nil {
+			cancelAttempt()
 		}
 	}
 
