@@ -1021,12 +1021,12 @@ func TestWithPerAttemptTimeout_BodyReadableAfterSuccess(t *testing.T) {
 	responseBody := "test response body"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(responseBody))
+		_, _ = w.Write([]byte(responseBody))
 	}))
 	defer server.Close()
 
 	client, err := NewClient(
-		WithPerAttemptTimeout(1 * time.Second), // Per-attempt timeout enabled
+		WithPerAttemptTimeout(1*time.Second), // Per-attempt timeout enabled
 		WithMaxRetries(3),
 	)
 	if err != nil {
