@@ -1,5 +1,6 @@
 # go-httpretry
 
+[![Trivy Security Scan](https://github.com/appleboy/go-httpretry/actions/workflows/security.yml/badge.svg)](https://github.com/appleboy/go-httpretry/actions/workflows/security.yml)
 [![Testing](https://github.com/appleboy/go-httpretry/actions/workflows/testing.yml/badge.svg)](https://github.com/appleboy/go-httpretry/actions/workflows/testing.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/appleboy/go-httpretry)](https://goreportcard.com/report/github.com/appleboy/go-httpretry)
 [![codecov](https://codecov.io/gh/appleboy/go-httpretry/branch/main/graph/badge.svg)](https://codecov.io/gh/appleboy/go-httpretry)
