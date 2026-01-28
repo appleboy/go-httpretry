@@ -46,7 +46,6 @@ type RetryInfo struct {
 	TotalElapsed time.Duration // Total time elapsed since first attempt
 }
 
-
 // NewClient creates a new retry-enabled HTTP client with the given options.
 // Returns an error if any option encounters an error.
 func NewClient(opts ...Option) (*Client, error) {
