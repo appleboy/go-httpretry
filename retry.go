@@ -314,7 +314,6 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	}
 }
 
-
 // Get is a convenience method for making GET requests with retry logic.
 // It creates a GET request for the specified URL and executes it with the configured retry behavior.
 func (c *Client) Get(
