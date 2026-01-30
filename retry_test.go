@@ -3,8 +3,10 @@ package retry
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -264,14 +266,25 @@ func TestClient_Do_ExhaustedRetries(t *testing.T) {
 	}
 
 	resp, err := client.Do(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected RetryError after exhausting retries")
+	}
+
+	// Should return the last response with 500 status
+	if resp == nil {
+		t.Fatal("expected response even with error")
 	}
 	defer resp.Body.Close()
 
-	// Should return the last response with 500 status
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected status 500, got %d", resp.StatusCode)
+	}
+
+	// Verify error is a RetryError
+	var retryErr *RetryError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("expected RetryError, got %T: %v", err, err)
 	}
 
 	// Should have 1 initial attempt + 2 retries = 3 total
@@ -1054,5 +1067,237 @@ func TestWithPerAttemptTimeout_BodyReadableAfterSuccess(t *testing.T) {
 
 	if string(body[:n]) != responseBody {
 		t.Errorf("expected body %q, got %q", responseBody, string(body[:n]))
+	}
+}
+
+func TestRetryError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *RetryError
+		contains string
+	}{
+		{
+			name: "with underlying error",
+			err: &RetryError{
+				Attempts:   3,
+				LastErr:    errors.New("connection refused"),
+				LastStatus: 0,
+				Elapsed:    1 * time.Second,
+			},
+			contains: "request failed after 3 attempts",
+		},
+		{
+			name: "with HTTP status code",
+			err: &RetryError{
+				Attempts:   4,
+				LastErr:    nil,
+				LastStatus: http.StatusInternalServerError,
+				Elapsed:    2 * time.Second,
+			},
+			contains: "HTTP 500",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errMsg := tt.err.Error()
+			if errMsg == "" {
+				t.Error("expected non-empty error message")
+			}
+			if tt.contains != "" && !strings.Contains(errMsg, tt.contains) {
+				t.Errorf("expected error message to contain %q, got %q", tt.contains, errMsg)
+			}
+		})
+	}
+}
+
+func TestRetryError_Unwrap(t *testing.T) {
+	underlyingErr := errors.New("connection timeout")
+	retryErr := &RetryError{
+		Attempts:   3,
+		LastErr:    underlyingErr,
+		LastStatus: 0,
+		Elapsed:    1 * time.Second,
+	}
+
+	unwrapped := retryErr.Unwrap()
+	if unwrapped != underlyingErr {
+		t.Errorf("expected unwrapped error to be %v, got %v", underlyingErr, unwrapped)
+	}
+
+	// Test that errors.Is works
+	if !errors.Is(retryErr, underlyingErr) {
+		t.Error("expected errors.Is to find underlying error")
+	}
+}
+
+func TestClient_Do_ReturnsRetryErrorOnExhaustion(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected error after exhausting retries")
+	}
+
+	// Verify error is a RetryError
+	var retryErr *RetryError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("expected RetryError, got %T: %v", err, err)
+	}
+
+	// Verify RetryError fields
+	expectedAttempts := 3 // 1 initial + 2 retries
+	if retryErr.Attempts != expectedAttempts {
+		t.Errorf("expected %d attempts in RetryError, got %d", expectedAttempts, retryErr.Attempts)
+	}
+
+	if retryErr.LastStatus != http.StatusInternalServerError {
+		t.Errorf("expected LastStatus 500, got %d", retryErr.LastStatus)
+	}
+
+	if retryErr.Elapsed <= 0 {
+		t.Errorf("expected positive elapsed time, got %v", retryErr.Elapsed)
+	}
+
+	// The last error should be nil since the request succeeded (just returned 500)
+	if retryErr.LastErr != nil {
+		t.Errorf("expected LastErr to be nil for status code errors, got %v", retryErr.LastErr)
+	}
+}
+
+func TestClient_Do_ReturnsRetryErrorOnContextCancellation(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond),
+		WithMaxRetries(5),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected error after context cancellation")
+	}
+
+	// Verify error is a RetryError
+	var retryErr *RetryError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("expected RetryError, got %T: %v", err, err)
+	}
+
+	// Verify the underlying error is context-related
+	if retryErr.LastErr != context.DeadlineExceeded {
+		t.Errorf("expected LastErr to be context.DeadlineExceeded, got %v", retryErr.LastErr)
+	}
+
+	// Verify we can unwrap to the context error
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Error("expected to unwrap to context.DeadlineExceeded")
+	}
+
+	if retryErr.Elapsed <= 0 {
+		t.Errorf("expected positive elapsed time, got %v", retryErr.Elapsed)
+	}
+}
+
+func TestClient_Do_ResponseBodyReadableAfterRetryExhaustion(t *testing.T) {
+	var attempts atomic.Int32
+	expectedBody := "error: service unavailable"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(expectedBody))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected error after exhausting retries")
+	}
+
+	// Verify error is a RetryError
+	var retryErr *RetryError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("expected RetryError, got %T: %v", err, err)
+	}
+
+	// Verify response is available
+	if resp == nil {
+		t.Fatal("expected response even with error")
+	}
+	defer resp.Body.Close()
+
+	// IMPORTANT: Verify we can read the response body from the last attempt
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("failed to read response body: %v", readErr)
+	}
+
+	if string(body) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, string(body))
+	}
+
+	// Verify the status code
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", resp.StatusCode)
+	}
+
+	// Should have 1 initial attempt + 2 retries = 3 total
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
 	}
 }

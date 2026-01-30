@@ -32,6 +32,11 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
   - [Default Retry Behavior](#default-retry-behavior)
   - [Exponential Backoff](#exponential-backoff)
   - [Context Support](#context-support)
+  - [Error Handling](#error-handling)
+    - [RetryError Structure](#retryerror-structure)
+    - [Using RetryError](#using-retryerror)
+    - [Error Wrapping Support](#error-wrapping-support)
+    - [Response Availability](#response-availability)
   - [Examples](#examples)
     - [Disable Retries](#disable-retries)
     - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
@@ -41,6 +46,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Retry with Jitter to Prevent Thundering Herd](#retry-with-jitter-to-prevent-thundering-herd)
     - [Respect Rate Limiting with Retry-After Header](#respect-rate-limiting-with-retry-after-header)
     - [Observability with Retry Callbacks](#observability-with-retry-callbacks)
+    - [Error Inspection with RetryError](#error-inspection-with-retryerror)
     - [Production-Ready Configuration](#production-ready-configuration)
     - [Custom TLS Configuration](#custom-tls-configuration)
       - [Example: Custom CA Certificate](#example-custom-ca-certificate)
@@ -54,6 +60,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
+- **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
 - **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
 - **Observability Hooks**: Callback functions for logging, metrics, and custom retry logic
@@ -362,6 +369,127 @@ if err != nil {
 }
 ```
 
+## Error Handling
+
+When all retry attempts are exhausted or the context is cancelled, the client returns a structured `RetryError` that provides detailed information about the failure. This allows for programmatic error inspection and better debugging.
+
+### RetryError Structure
+
+The `RetryError` type contains:
+
+- **Attempts**: Total number of attempts made (initial request + retries)
+- **LastErr**: The underlying error from the last attempt (e.g., network error, context timeout)
+- **LastStatus**: HTTP status code from the last attempt (0 if the request failed before receiving a response)
+- **Elapsed**: Total time elapsed from the first attempt to the final failure
+
+### Using RetryError
+
+```go
+import (
+    "context"
+    "errors"
+    "log"
+    "net/http"
+    "time"
+
+    "github.com/appleboy/go-httpretry"
+)
+
+client, _ := retry.NewClient(
+    retry.WithMaxRetries(3),
+    retry.WithInitialRetryDelay(1*time.Second),
+)
+
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+resp, err := client.Do(context.Background(), req)
+if err != nil {
+    // Check if it's a RetryError
+    var retryErr *retry.RetryError
+    if errors.As(err, &retryErr) {
+        log.Printf("Request failed after %d attempts in %v",
+            retryErr.Attempts,
+            retryErr.Elapsed,
+        )
+
+        // Check the last HTTP status code
+        if retryErr.LastStatus != 0 {
+            log.Printf("Last HTTP status: %d", retryErr.LastStatus)
+        }
+
+        // Check for specific underlying errors
+        if errors.Is(err, context.DeadlineExceeded) {
+            log.Println("Timeout occurred during retries")
+        }
+
+        // Access the underlying error
+        if retryErr.LastErr != nil {
+            log.Printf("Last error: %v", retryErr.LastErr)
+        }
+    }
+    return
+}
+defer resp.Body.Close()
+```
+
+### Error Wrapping Support
+
+`RetryError` implements Go's error wrapping interface (`Unwrap()`), which means you can use `errors.Is()` and `errors.As()` to check for underlying errors:
+
+```go
+import (
+    "context"
+    "errors"
+    "log"
+    "net"
+)
+
+resp, err := client.Do(ctx, req)
+if err != nil {
+    // Check if the underlying error is a context timeout
+    if errors.Is(err, context.DeadlineExceeded) {
+        log.Println("Request timed out")
+    }
+
+    // Check if it's a specific network error
+    var netErr net.Error
+    if errors.As(err, &netErr) && netErr.Timeout() {
+        log.Println("Network timeout occurred")
+    }
+}
+```
+
+### Response Availability
+
+**Important**: When all retries are exhausted but the last attempt received a response (even with an error status like 500), both the `response` and the `RetryError` are returned. This allows you to inspect the final response:
+
+```go
+import (
+    "errors"
+    "io"
+    "log"
+
+    "github.com/appleboy/go-httpretry"
+)
+
+resp, err := client.Do(ctx, req)
+if err != nil {
+    var retryErr *retry.RetryError
+    if errors.As(err, &retryErr) {
+        log.Printf("Exhausted retries: %d attempts", retryErr.Attempts)
+
+        // The response may still be available for inspection
+        if resp != nil {
+            defer resp.Body.Close()
+            log.Printf("Last response status: %d", resp.StatusCode)
+
+            // You can read the response body if needed
+            body, _ := io.ReadAll(resp.Body)
+            log.Printf("Last response body: %s", body)
+        }
+    }
+}
+```
+
 ## Examples
 
 ### Disable Retries
@@ -547,6 +675,65 @@ if err != nil {
 defer resp.Body.Close()
 
 log.Printf("Request succeeded after %d retries", retryCount)
+```
+
+### Error Inspection with RetryError
+
+```go
+import (
+    "context"
+    "errors"
+    "log"
+    "net/http"
+    "time"
+
+    "github.com/appleboy/go-httpretry"
+)
+
+client, _ := retry.NewClient(
+    retry.WithMaxRetries(3),
+    retry.WithInitialRetryDelay(1*time.Second),
+)
+
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
+resp, err := client.Do(ctx, req)
+if err != nil {
+    // Use RetryError for detailed failure analysis
+    var retryErr *retry.RetryError
+    if errors.As(err, &retryErr) {
+        // Log detailed retry information
+        log.Printf("Request failed:")
+        log.Printf("  - Total attempts: %d", retryErr.Attempts)
+        log.Printf("  - Time elapsed: %v", retryErr.Elapsed)
+        log.Printf("  - Last status: %d", retryErr.LastStatus)
+
+        // Check if it was a timeout
+        if errors.Is(err, context.DeadlineExceeded) {
+            log.Println("  - Reason: timeout")
+            // Handle timeout specifically (e.g., use circuit breaker)
+            return
+        }
+
+        // Check if it was a server error
+        if retryErr.LastStatus >= 500 {
+            log.Println("  - Reason: server error")
+            // Handle server errors (e.g., alert on-call team)
+            return
+        }
+
+        // Handle other errors
+        if retryErr.LastErr != nil {
+            log.Printf("  - Error: %v", retryErr.LastErr)
+        }
+    }
+    return
+}
+defer resp.Body.Close()
+
+log.Println("Request succeeded!")
 ```
 
 ### Production-Ready Configuration
