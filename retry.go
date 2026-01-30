@@ -274,12 +274,30 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			return resp, lastErr
 		}
 
-		// Going to retry: close response body and cancel per-attempt context
-		if resp != nil && resp.Body != nil {
-			resp.Body.Close()
-		}
-		if cancelAttempt != nil {
-			cancelAttempt()
+		// Check if this is the last attempt
+		isLastAttempt := attempt == c.maxRetries
+
+		// Going to retry or exhausted retries
+		if !isLastAttempt {
+			// Not the last attempt: close response body and cancel per-attempt context
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+			if cancelAttempt != nil {
+				cancelAttempt()
+			}
+		} else {
+			// Last attempt: keep response body open but cancel per-attempt context
+			// Wrap the response body to cancel the per-attempt context when the body is closed
+			if cancelAttempt != nil && resp != nil && resp.Body != nil {
+				resp.Body = &cancelOnCloseBody{
+					ReadCloser: resp.Body,
+					cancel:     cancelAttempt,
+				}
+			} else if cancelAttempt != nil {
+				// No body to wrap, cancel immediately
+				cancelAttempt()
+			}
 		}
 	}
 

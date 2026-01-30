@@ -3,8 +3,10 @@ package retry
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1102,7 +1104,7 @@ func TestRetryError_Error(t *testing.T) {
 			if errMsg == "" {
 				t.Error("expected non-empty error message")
 			}
-			if tt.contains != "" && !containsString(errMsg, tt.contains) {
+			if tt.contains != "" && !strings.Contains(errMsg, tt.contains) {
 				t.Errorf("expected error message to contain %q, got %q", tt.contains, errMsg)
 			}
 		})
@@ -1236,17 +1238,66 @@ func TestClient_Do_ReturnsRetryErrorOnContextCancellation(t *testing.T) {
 	}
 }
 
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
+func TestClient_Do_ResponseBodyReadableAfterRetryExhaustion(t *testing.T) {
+	var attempts atomic.Int32
+	expectedBody := "error: service unavailable"
 
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(expectedBody))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
 	}
-	return false
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected error after exhausting retries")
+	}
+
+	// Verify error is a RetryError
+	var retryErr *RetryError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("expected RetryError, got %T: %v", err, err)
+	}
+
+	// Verify response is available
+	if resp == nil {
+		t.Fatal("expected response even with error")
+	}
+	defer resp.Body.Close()
+
+	// IMPORTANT: Verify we can read the response body from the last attempt
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		t.Fatalf("failed to read response body: %v", readErr)
+	}
+
+	if string(body) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, string(body))
+	}
+
+	// Verify the status code
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", resp.StatusCode)
+	}
+
+	// Should have 1 initial attempt + 2 retries = 3 total
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
+	}
 }
