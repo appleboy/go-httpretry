@@ -314,35 +314,6 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	}
 }
 
-// RequestOption is a function that configures an HTTP request
-type RequestOption func(*http.Request)
-
-// WithBody sets the request body and optionally the Content-Type header.
-// If contentType is empty, no Content-Type header will be set.
-func WithBody(contentType string, body io.Reader) RequestOption {
-	return func(req *http.Request) {
-		req.Body = io.NopCloser(body)
-		if contentType != "" {
-			req.Header.Set("Content-Type", contentType)
-		}
-	}
-}
-
-// WithHeader sets a header key-value pair on the request.
-func WithHeader(key, value string) RequestOption {
-	return func(req *http.Request) {
-		req.Header.Set(key, value)
-	}
-}
-
-// WithHeaders sets multiple headers on the request.
-func WithHeaders(headers map[string]string) RequestOption {
-	return func(req *http.Request) {
-		for key, value := range headers {
-			req.Header.Set(key, value)
-		}
-	}
-}
 
 // Get is a convenience method for making GET requests with retry logic.
 // It creates a GET request for the specified URL and executes it with the configured retry behavior.

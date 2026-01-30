@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"io"
 	"net/http"
 	"time"
 )
@@ -100,6 +101,36 @@ func WithPerAttemptTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		if d >= 0 {
 			c.perAttemptTimeout = d
+		}
+	}
+}
+
+// RequestOption is a function that configures an HTTP request
+type RequestOption func(*http.Request)
+
+// WithBody sets the request body and optionally the Content-Type header.
+// If contentType is empty, no Content-Type header will be set.
+func WithBody(contentType string, body io.Reader) RequestOption {
+	return func(req *http.Request) {
+		req.Body = io.NopCloser(body)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+	}
+}
+
+// WithHeader sets a header key-value pair on the request.
+func WithHeader(key, value string) RequestOption {
+	return func(req *http.Request) {
+		req.Header.Set(key, value)
+	}
+}
+
+// WithHeaders sets multiple headers on the request.
+func WithHeaders(headers map[string]string) RequestOption {
+	return func(req *http.Request) {
+		for key, value := range headers {
+			req.Header.Set(key, value)
 		}
 	}
 }
