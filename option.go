@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"time"
@@ -110,9 +111,34 @@ type RequestOption func(*http.Request)
 
 // WithBody sets the request body and optionally the Content-Type header.
 // If contentType is empty, no Content-Type header will be set.
+//
+// IMPORTANT: To support retries, this function buffers the entire body in memory
+// and sets up the GetBody field. This allows the request to be retried with the
+// same body content. For large request bodies, consider using the Do method directly
+// with a custom GetBody function.
 func WithBody(contentType string, body io.Reader) RequestOption {
 	return func(req *http.Request) {
-		req.Body = io.NopCloser(body)
+		// Buffer the entire body to support retries.
+		// http.Request.Clone() uses GetBody to get a fresh reader for each retry.
+		// Without this, retries would send an empty body because io.Reader is consumed.
+		data, err := io.ReadAll(body)
+		if err != nil {
+			// If reading fails, set the body as-is (best effort).
+			// The request will fail when actually executed.
+			req.Body = io.NopCloser(body)
+			if contentType != "" {
+				req.Header.Set("Content-Type", contentType)
+			}
+			return
+		}
+
+		// Set both Body and GetBody to support request retries
+		req.Body = io.NopCloser(bytes.NewReader(data))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+		req.ContentLength = int64(len(data))
+
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}

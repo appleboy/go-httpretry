@@ -1680,3 +1680,114 @@ func TestRequestOptions(t *testing.T) {
 		defer resp.Body.Close()
 	})
 }
+
+// TestRequestBody_WithRetry tests that request bodies are sent correctly on retries
+func TestRequestBody_WithRetry(t *testing.T) {
+	expectedBody := `{"key":"value","number":123}`
+	var attempts atomic.Int32
+	var receivedBodies []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+
+		// Read the body
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read body: %v", err)
+		}
+		receivedBodies = append(receivedBodies, string(bodyBytes))
+
+		// Fail on first two attempts, succeed on third
+		if count < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(3),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Make a POST request with a JSON body
+	resp, err := client.Post(context.Background(), server.URL,
+		WithBody("application/json", strings.NewReader(expectedBody)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify we made 3 attempts
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
+	}
+
+	// CRITICAL: Verify that the body was sent correctly on ALL attempts
+	// This tests that GetBody was set up properly and retries don't send empty bodies
+	for i, body := range receivedBodies {
+		if body != expectedBody {
+			t.Errorf("attempt %d: expected body %q, got %q", i+1, expectedBody, body)
+		}
+	}
+}
+
+// TestRequestBody_LargeBody tests that larger request bodies work correctly with retries
+func TestRequestBody_LargeBody(t *testing.T) {
+	// Create a 1KB body
+	largeBody := strings.Repeat("x", 1024)
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+
+		// Read and verify the body
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read body: %v", err)
+		}
+
+		if string(bodyBytes) != largeBody {
+			t.Errorf("attempt %d: body mismatch, got %d bytes", count, len(bodyBytes))
+		}
+
+		// Fail on first attempt, succeed on second
+		if count < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(2),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Put(context.Background(), server.URL,
+		WithBody("text/plain", strings.NewReader(largeBody)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	if attempts.Load() != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts.Load())
+	}
+}
