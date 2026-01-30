@@ -46,6 +46,38 @@ type RetryInfo struct {
 	TotalElapsed time.Duration // Total time elapsed since first attempt
 }
 
+// RetryError is returned when all retry attempts have been exhausted.
+// It provides detailed information about the retry attempts and the final failure.
+type RetryError struct {
+	Attempts   int           // Total number of attempts made (initial + retries)
+	LastErr    error         // The last error that occurred (nil if last attempt had non-retryable status)
+	LastStatus int           // HTTP status code from the last attempt (0 if request failed)
+	Elapsed    time.Duration // Total time elapsed from first attempt to final failure
+}
+
+// Error implements the error interface
+func (e *RetryError) Error() string {
+	if e.LastErr != nil {
+		return fmt.Sprintf(
+			"request failed after %d attempts (elapsed: %v): %v",
+			e.Attempts,
+			e.Elapsed,
+			e.LastErr,
+		)
+	}
+	return fmt.Sprintf(
+		"request failed after %d attempts (elapsed: %v): HTTP %d",
+		e.Attempts,
+		e.Elapsed,
+		e.LastStatus,
+	)
+}
+
+// Unwrap returns the underlying error for error unwrapping
+func (e *RetryError) Unwrap() error {
+	return e.LastErr
+}
+
 // NewClient creates a new retry-enabled HTTP client with the given options.
 // Returns an error if any option encounters an error.
 func NewClient(opts ...Option) (*Client, error) {
@@ -194,14 +226,17 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			// Wait before retry
 			select {
 			case <-ctx.Done():
-				if lastErr != nil {
-					return nil, fmt.Errorf(
-						"context cancelled after %d attempts: %w",
-						attempt,
-						lastErr,
-					)
+				// Context cancelled - return RetryError with information about the attempts made
+				statusCode := 0
+				if resp != nil {
+					statusCode = resp.StatusCode
 				}
-				return nil, ctx.Err()
+				return nil, &RetryError{
+					Attempts:   attempt,
+					LastErr:    ctx.Err(),
+					LastStatus: statusCode,
+					Elapsed:    time.Since(startTime),
+				}
 			case <-time.After(actualDelay):
 				// Calculate next delay with exponential backoff (for next iteration)
 				delay = time.Duration(float64(delay) * c.retryDelayMultiple)
@@ -248,10 +283,15 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		}
 	}
 
-	// All retries exhausted
-	if lastErr != nil {
-		return nil, fmt.Errorf("request failed after %d retries: %w", c.maxRetries, lastErr)
+	// All retries exhausted - return RetryError with detailed information
+	statusCode := 0
+	if resp != nil {
+		statusCode = resp.StatusCode
 	}
-
-	return resp, lastErr
+	return resp, &RetryError{
+		Attempts:   c.maxRetries + 1, // +1 because attempts include the initial request
+		LastErr:    lastErr,
+		LastStatus: statusCode,
+		Elapsed:    time.Since(startTime),
+	}
 }
