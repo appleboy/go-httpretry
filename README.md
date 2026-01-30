@@ -17,6 +17,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
   - [Installation](#installation)
   - [Quick Start](#quick-start)
     - [Basic Usage (Default Settings)](#basic-usage-default-settings)
+    - [Using Convenience Methods](#using-convenience-methods)
     - [Custom Configuration](#custom-configuration)
   - [Configuration Options](#configuration-options)
     - [`WithMaxRetries(n int)`](#withmaxretriesn-int)
@@ -29,6 +30,11 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [`WithRespectRetryAfter(enabled bool)`](#withrespectretryafterenabled-bool)
     - [`WithPerAttemptTimeout(d time.Duration)`](#withperattempttimeoutd-timeduration)
     - [`WithOnRetry(fn OnRetryFunc)`](#withonretryfn-onretryfunc)
+  - [Request Options](#request-options)
+    - [`WithBody(contentType string, body io.Reader)`](#withbodycontenttype-string-body-ioreader)
+    - [`WithHeader(key, value string)`](#withheaderkey-value-string)
+    - [`WithHeaders(headers map[string]string)`](#withheadersheaders-mapstringstring)
+    - [Combining Multiple Options](#combining-multiple-options)
   - [Default Retry Behavior](#default-retry-behavior)
   - [Exponential Backoff](#exponential-backoff)
   - [Context Support](#context-support)
@@ -38,6 +44,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Error Wrapping Support](#error-wrapping-support)
     - [Response Availability](#response-availability)
   - [Examples](#examples)
+    - [Using Convenience Methods](#using-convenience-methods-1)
     - [Disable Retries](#disable-retries)
     - [Aggressive Retries for Critical Requests](#aggressive-retries-for-critical-requests)
     - [Conservative Retries for Background Tasks](#conservative-retries-for-background-tasks)
@@ -61,6 +68,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
 - **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
+- **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional request configuration
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
 - **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
 - **Observability Hooks**: Callback functions for logging, metrics, and custom retry logic
@@ -94,7 +102,6 @@ package main
 import (
     "context"
     "log"
-    "net/http"
 
     "github.com/appleboy/go-httpretry"
 )
@@ -112,13 +119,33 @@ func main() {
         log.Fatal(err)
     }
 
-    req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/data", nil)
-    resp, err := client.Do(context.Background(), req)
+    // Simple GET request
+    resp, err := client.Get(context.Background(), "https://api.example.com/data")
     if err != nil {
         log.Fatal(err)
     }
     defer resp.Body.Close()
 }
+```
+
+### Using Convenience Methods
+
+```go
+// GET request
+resp, err := client.Get(ctx, "https://api.example.com/users")
+
+// POST request with JSON body
+jsonData := bytes.NewReader([]byte(`{"name":"John"}`))
+resp, err := client.Post(ctx, "https://api.example.com/users",
+    retry.WithBody("application/json", jsonData))
+
+// PUT request with custom headers
+resp, err := client.Put(ctx, "https://api.example.com/users/123",
+    retry.WithBody("application/json", jsonData),
+    retry.WithHeader("Authorization", "Bearer token"))
+
+// DELETE request
+resp, err := client.Delete(ctx, "https://api.example.com/users/123")
 ```
 
 ### Custom Configuration
@@ -323,6 +350,60 @@ The `RetryInfo` struct contains:
 
 **Use Case**: Essential for production observability - integrate with your logging system, metrics (Prometheus, Datadog), or alerting.
 
+## Request Options
+
+The convenience methods (Get, Post, Put, Patch, Delete, Head) support optional request configuration through `RequestOption` functions:
+
+### `WithBody(contentType string, body io.Reader)`
+
+Sets the request body and optionally the Content-Type header. If `contentType` is empty, no Content-Type header will be set.
+
+```go
+// POST request with JSON body
+jsonData := bytes.NewReader([]byte(`{"username":"user","password":"pass"}`))
+resp, err := client.Post(ctx, "https://api.example.com/login",
+    retry.WithBody("application/json", jsonData))
+
+// POST request with body but no Content-Type
+resp, err := client.Post(ctx, "https://api.example.com/data",
+    retry.WithBody("", strings.NewReader("plain text data")))
+```
+
+### `WithHeader(key, value string)`
+
+Sets a single header on the request.
+
+```go
+resp, err := client.Get(ctx, "https://api.example.com/protected",
+    retry.WithHeader("Authorization", "Bearer your-token-here"))
+```
+
+### `WithHeaders(headers map[string]string)`
+
+Sets multiple headers on the request.
+
+```go
+resp, err := client.Post(ctx, "https://api.example.com/api",
+    retry.WithBody("application/json", jsonData),
+    retry.WithHeaders(map[string]string{
+        "Authorization": "Bearer token",
+        "X-Request-ID": "req-12345",
+        "X-API-Version": "v2",
+    }))
+```
+
+### Combining Multiple Options
+
+Request options can be combined to configure complex requests:
+
+```go
+resp, err := client.Post(ctx, "https://api.example.com/graphql",
+    retry.WithBody("application/json", graphqlQuery),
+    retry.WithHeader("Authorization", "Bearer token"),
+    retry.WithHeader("X-Request-ID", requestID),
+    retry.WithHeader("Content-Encoding", "gzip"))
+```
+
 ## Default Retry Behavior
 
 The `DefaultRetryableChecker` retries in the following cases:
@@ -491,6 +572,45 @@ if err != nil {
 ```
 
 ## Examples
+
+### Using Convenience Methods
+
+The convenience methods provide a simpler API for common HTTP operations:
+
+```go
+client, err := retry.NewClient(retry.WithMaxRetries(3))
+if err != nil {
+    log.Fatal(err)
+}
+
+ctx := context.Background()
+
+// Simple GET request
+resp, err := client.Get(ctx, "https://api.example.com/users")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+// POST with JSON body
+user := User{Name: "John", Email: "john@example.com"}
+jsonData, _ := json.Marshal(user)
+resp, err = client.Post(ctx, "https://api.example.com/users",
+    retry.WithBody("application/json", bytes.NewReader(jsonData)))
+
+// PUT with authentication
+resp, err = client.Put(ctx, "https://api.example.com/users/123",
+    retry.WithBody("application/json", bytes.NewReader(jsonData)),
+    retry.WithHeader("Authorization", "Bearer token"))
+
+// DELETE request
+resp, err = client.Delete(ctx, "https://api.example.com/users/123")
+
+// GET with custom headers
+resp, err = client.Get(ctx, "https://api.example.com/protected",
+    retry.WithHeader("Authorization", "Bearer token"),
+    retry.WithHeader("X-Request-ID", "req-123"))
+```
 
 ### Disable Retries
 
@@ -859,8 +979,9 @@ go test -v -cover ./...
 
 ## Design Principles
 
-- **Functional Options Pattern**: Provides clean, flexible API for configuration
+- **Functional Options Pattern**: Provides clean, flexible API for both client configuration and request options
 - **Sensible Defaults**: Works out of the box for most use cases
+- **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional configuration through RequestOption functions
 - **Separation of Concerns**: HTTP client configuration (including TLS) is the user's responsibility; retry logic is ours
 - **Single Responsibility**: Focus exclusively on retry behavior, not HTTP client building
 - **Context-Aware**: Respects cancellation and timeouts

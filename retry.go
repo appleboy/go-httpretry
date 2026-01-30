@@ -313,3 +313,138 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		Elapsed:    time.Since(startTime),
 	}
 }
+
+// RequestOption is a function that configures an HTTP request
+type RequestOption func(*http.Request)
+
+// WithBody sets the request body and optionally the Content-Type header.
+// If contentType is empty, no Content-Type header will be set.
+func WithBody(contentType string, body io.Reader) RequestOption {
+	return func(req *http.Request) {
+		req.Body = io.NopCloser(body)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+	}
+}
+
+// WithHeader sets a header key-value pair on the request.
+func WithHeader(key, value string) RequestOption {
+	return func(req *http.Request) {
+		req.Header.Set(key, value)
+	}
+}
+
+// WithHeaders sets multiple headers on the request.
+func WithHeaders(headers map[string]string) RequestOption {
+	return func(req *http.Request) {
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+	}
+}
+
+// Get is a convenience method for making GET requests with retry logic.
+// It creates a GET request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Get(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Head is a convenience method for making HEAD requests with retry logic.
+// It creates a HEAD request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Head(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Post is a convenience method for making POST requests with retry logic.
+// It creates a POST request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Post(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Put is a convenience method for making PUT requests with retry logic.
+// It creates a PUT request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Put(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Patch is a convenience method for making PATCH requests with retry logic.
+// It creates a PATCH request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Patch(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Delete is a convenience method for making DELETE requests with retry logic.
+// It creates a DELETE request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Delete(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
