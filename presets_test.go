@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -247,8 +248,12 @@ func TestNewConservativeClient_LimitedRetries(t *testing.T) {
 		resp.Body.Close()
 		t.Fatal("Get() expected error, got nil")
 	}
-	if !isRetryError(err, &retryErr) {
+	if !errors.As(err, &retryErr) {
 		t.Fatalf("Get() error type = %T, want *RetryError", err)
+	}
+
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 
 	// Should have made initial attempt + 2 retries = 3 total attempts
@@ -318,16 +323,4 @@ func TestPresets_Integration(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper function to check if error is RetryError
-func isRetryError(err error, target **RetryError) bool {
-	if err == nil {
-		return false
-	}
-	if re, ok := err.(*RetryError); ok {
-		*target = re
-		return true
-	}
-	return false
 }
