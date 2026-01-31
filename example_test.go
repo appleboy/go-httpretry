@@ -308,3 +308,144 @@ func Example_insecureTLS() {
 
 	fmt.Printf("Connected (insecure): %d\n", resp.StatusCode)
 }
+
+// Example_presetRealtimeClient demonstrates using the realtime preset
+// for user-facing requests that require fast response times
+func Example_presetRealtimeClient() {
+	// Use the realtime preset for user-facing operations
+	// (2 retries, 100ms initial delay, 1s max delay, 3s per-attempt timeout)
+	client, err := retry.NewRealtimeClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "https://api.example.com/search?q=hello")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Search results retrieved")
+}
+
+// Example_presetBackgroundClient demonstrates using the background preset
+// for non-time-sensitive operations like batch jobs
+func Example_presetBackgroundClient() {
+	// Use the background preset for background tasks
+	// (10 retries, 5s initial delay, 60s max delay, 3.0x multiplier, 30s per-attempt timeout)
+	client, err := retry.NewBackgroundClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Post(ctx, "https://api.example.com/batch/sync")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Batch sync completed")
+}
+
+// Example_presetRateLimitedClient demonstrates using the rate-limited preset
+// for APIs with strict rate limits and Retry-After headers
+func Example_presetRateLimitedClient() {
+	// Use the rate-limited preset for third-party APIs
+	// (5 retries, 2s initial delay, respects Retry-After header, jitter enabled)
+	client, err := retry.NewRateLimitedClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "https://api.github.com/users/appleboy")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("GitHub API responded: %d\n", resp.StatusCode)
+}
+
+// Example_presetMicroserviceClient demonstrates using the microservice preset
+// for internal service-to-service communication
+func Example_presetMicroserviceClient() {
+	// Use the microservice preset for internal calls
+	// (3 retries, 50ms initial delay, 500ms max delay, 2s per-attempt timeout, jitter enabled)
+	client, err := retry.NewMicroserviceClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "http://user-service:8080/users/123")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("User data retrieved from internal service")
+}
+
+// Example_presetAggressiveClient demonstrates using the aggressive preset
+// for scenarios with frequent transient failures
+func Example_presetAggressiveClient() {
+	// Use the aggressive preset for unreliable networks
+	// (10 retries, 100ms initial delay, 5s max delay)
+	client, err := retry.NewAggressiveClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "https://unreliable-api.example.com/data")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Data retrieved after aggressive retries")
+}
+
+// Example_presetConservativeClient demonstrates using the conservative preset
+// for operations where you want to be cautious about retry storms
+func Example_presetConservativeClient() {
+	// Use the conservative preset to avoid retry storms
+	// (2 retries, 5s initial delay)
+	client, err := retry.NewConservativeClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Post(ctx, "https://api.example.com/expensive-operation")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Expensive operation completed")
+}
+
+// Example_presetWithCustomOverride demonstrates overriding preset defaults
+func Example_presetWithCustomOverride() {
+	// Start with a preset and override specific settings
+	client, err := retry.NewRealtimeClient(
+		retry.WithMaxRetries(5),                          // Override: more retries than default (2)
+		retry.WithInitialRetryDelay(50*time.Millisecond), // Override: faster initial retry
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "https://api.example.com/data")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Println("Request completed with custom realtime config")
+}

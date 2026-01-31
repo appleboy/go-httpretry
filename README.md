@@ -19,6 +19,14 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Basic Usage (Default Settings)](#basic-usage-default-settings)
     - [Using Convenience Methods](#using-convenience-methods)
     - [Custom Configuration](#custom-configuration)
+  - [Preset Configurations](#preset-configurations)
+    - [NewRealtimeClient](#newrealtimeclient)
+    - [NewBackgroundClient](#newbackgroundclient)
+    - [NewRateLimitedClient](#newratelimitedclient)
+    - [NewMicroserviceClient](#newmicroserviceclient)
+    - [NewAggressiveClient](#newaggressiveclient)
+    - [NewConservativeClient](#newconservativeclient)
+    - [Customizing Presets](#customizing-presets)
   - [Configuration Options](#configuration-options)
     - [`WithMaxRetries(n int)`](#withmaxretriesn-int)
     - [`WithInitialRetryDelay(d time.Duration)`](#withinitialretrydelayd-timeduration)
@@ -67,6 +75,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
+- **Preset Configurations**: Ready-to-use presets for common scenarios (realtime, background, rate-limited, microservice, etc.)
 - **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
 - **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional request configuration
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
@@ -160,6 +169,183 @@ client, err := retry.NewClient(
 if err != nil {
     log.Fatal(err)
 }
+```
+
+## Preset Configurations
+
+The library provides preset configurations optimized for common use cases. Each preset is fully customizable - you can override any setting while keeping the rest of the preset defaults.
+
+### NewRealtimeClient
+
+Optimized for user-facing requests that require fast response times, such as interactive UI operations and real-time search.
+
+**Configuration:**
+
+- Max retries: 2 (quick failure for better UX)
+- Initial delay: 100ms
+- Max delay: 1s
+- Per-attempt timeout: 3s
+
+**Use cases:** Search suggestions, user interactions, interactive API calls
+
+```go
+client, err := retry.NewRealtimeClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Get(context.Background(), "https://api.example.com/search?q=hello")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### NewBackgroundClient
+
+Optimized for background tasks and scheduled jobs where reliability is more important than speed.
+
+**Configuration:**
+
+- Max retries: 10 (persistent retries)
+- Initial delay: 5s
+- Max delay: 60s
+- Backoff multiplier: 3.0 (aggressive exponential backoff)
+- Per-attempt timeout: 30s
+
+**Use cases:** Batch data sync, scheduled jobs, data export/import
+
+```go
+client, err := retry.NewBackgroundClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Post(context.Background(), "https://api.example.com/batch/sync")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### NewRateLimitedClient
+
+Optimized for APIs with strict rate limits. Respects server-provided `Retry-After` headers and uses jitter to prevent thundering herd problems.
+
+**Configuration:**
+
+- Max retries: 5
+- Initial delay: 2s
+- Max delay: 30s
+- Respects Retry-After header (enabled)
+- Jitter (enabled)
+
+**Use cases:** Third-party APIs (GitHub, Stripe, AWS), rate-limited endpoints
+
+```go
+client, err := retry.NewRateLimitedClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Get(context.Background(), "https://api.github.com/users/appleboy")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### NewMicroserviceClient
+
+Optimized for internal microservice communication within the same network (e.g., Kubernetes cluster).
+
+**Configuration:**
+
+- Max retries: 3
+- Initial delay: 50ms
+- Max delay: 500ms
+- Per-attempt timeout: 2s
+- Jitter (enabled)
+
+**Use cases:** Kubernetes pod-to-pod communication, internal service calls, low-latency internal APIs
+
+```go
+client, err := retry.NewMicroserviceClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Get(context.Background(), "http://user-service:8080/users/123")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### NewAggressiveClient
+
+Optimized for scenarios with frequent transient failures, attempting many retries with short delays.
+
+**Configuration:**
+
+- Max retries: 10 (many retry attempts)
+- Initial delay: 100ms
+- Max delay: 5s
+
+**Use cases:** Highly unreliable networks, services with frequent transient failures
+
+```go
+client, err := retry.NewAggressiveClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Get(context.Background(), "https://unreliable-api.example.com/data")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### NewConservativeClient
+
+Conservative approach with fewer retries and longer delays to avoid retry storms.
+
+**Configuration:**
+
+- Max retries: 2
+- Initial delay: 5s
+
+**Use cases:** Preventing retry storms, expensive operations, external APIs with strict limits
+
+```go
+client, err := retry.NewConservativeClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := client.Post(context.Background(), "https://api.example.com/expensive-operation")
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+```
+
+### Customizing Presets
+
+All preset defaults can be overridden:
+
+```go
+// Start with realtime preset but use more retries
+client, err := retry.NewRealtimeClient(
+    retry.WithMaxRetries(5),                           // Override: more retries
+    retry.WithInitialRetryDelay(50*time.Millisecond),  // Override: faster retry
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Other preset settings remain unchanged
 ```
 
 ## Configuration Options
