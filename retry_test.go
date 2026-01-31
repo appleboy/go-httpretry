@@ -1528,36 +1528,119 @@ func TestClient_Delete(t *testing.T) {
 
 // TestConvenienceMethods_WithRetry tests that convenience methods properly retry
 func TestConvenienceMethods_WithRetry(t *testing.T) {
-	var attempts atomic.Int32
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := attempts.Add(1)
-		if count < 2 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client, err := NewClient(
-		WithInitialRetryDelay(10*time.Millisecond),
-		WithMaxRetries(2),
-	)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
+	tests := []struct {
+		name         string
+		method       string
+		withBody     bool
+		expectedBody string
+		fn           func(*Client, context.Context, string, ...RequestOption) (*http.Response, error)
+	}{
+		{
+			name:   "Get",
+			method: http.MethodGet,
+			fn:     (*Client).Get,
+		},
+		{
+			name:   "Head",
+			method: http.MethodHead,
+			fn:     (*Client).Head,
+		},
+		{
+			name:         "Post",
+			method:       http.MethodPost,
+			withBody:     true,
+			expectedBody: `{"action":"create"}`,
+			fn:           (*Client).Post,
+		},
+		{
+			name:         "Put",
+			method:       http.MethodPut,
+			withBody:     true,
+			expectedBody: `{"action":"update"}`,
+			fn:           (*Client).Put,
+		},
+		{
+			name:         "Patch",
+			method:       http.MethodPatch,
+			withBody:     true,
+			expectedBody: `{"action":"patch"}`,
+			fn:           (*Client).Patch,
+		},
+		{
+			name:   "Delete",
+			method: http.MethodDelete,
+			fn:     (*Client).Delete,
+		},
 	}
 
-	// Test Get with retry
-	attempts.Store(0)
-	resp, err := client.Get(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	resp.Body.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			var receivedBodies []string
 
-	if attempts.Load() != 2 {
-		t.Errorf("expected 2 attempts for Get, got %d", attempts.Load())
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != tt.method {
+						t.Errorf("expected %s method, got %s", tt.method, r.Method)
+					}
+
+					// Read body if present
+					if tt.withBody {
+						bodyBytes, err := io.ReadAll(r.Body)
+						if err != nil {
+							t.Errorf("failed to read body: %v", err)
+						}
+						receivedBodies = append(receivedBodies, string(bodyBytes))
+					}
+
+					count := attempts.Add(1)
+					if count < 2 {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}),
+			)
+			defer server.Close()
+
+			client, err := NewClient(
+				WithInitialRetryDelay(10*time.Millisecond),
+				WithMaxRetries(2),
+			)
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			// Make the request with optional body
+			var resp *http.Response
+			if tt.withBody {
+				resp, err = tt.fn(client, context.Background(), server.URL,
+					WithBody("application/json", strings.NewReader(tt.expectedBody)))
+			} else {
+				resp, err = tt.fn(client, context.Background(), server.URL)
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			resp.Body.Close()
+
+			if attempts.Load() != 2 {
+				t.Errorf("expected 2 attempts, got %d", attempts.Load())
+			}
+
+			// Verify body was sent correctly on all attempts
+			if tt.withBody {
+				if len(receivedBodies) != 2 {
+					t.Fatalf("expected 2 received bodies, got %d", len(receivedBodies))
+				}
+				for i, body := range receivedBodies {
+					if body != tt.expectedBody {
+						t.Errorf("attempt %d: expected body %q, got %q", i+1, tt.expectedBody, body)
+					}
+				}
+			}
+		})
 	}
 }
 
