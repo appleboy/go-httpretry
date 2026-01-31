@@ -313,3 +313,84 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 		Elapsed:    time.Since(startTime),
 	}
 }
+
+// doRequest is a helper method that creates and executes an HTTP request with retry logic.
+// It handles the common pattern of creating a request, applying options, and executing it.
+func (c *Client) doRequest(
+	ctx context.Context,
+	method string,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	return c.Do(ctx, req)
+}
+
+// Get is a convenience method for making GET requests with retry logic.
+// It creates a GET request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Get(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodGet, url, opts...)
+}
+
+// Head is a convenience method for making HEAD requests with retry logic.
+// It creates a HEAD request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Head(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodHead, url, opts...)
+}
+
+// Post is a convenience method for making POST requests with retry logic.
+// It creates a POST request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Post(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodPost, url, opts...)
+}
+
+// Put is a convenience method for making PUT requests with retry logic.
+// It creates a PUT request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Put(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodPut, url, opts...)
+}
+
+// Patch is a convenience method for making PATCH requests with retry logic.
+// It creates a PATCH request with the specified URL and executes it with the configured retry behavior.
+// Use WithBody() to add a request body and content type.
+func (c *Client) Patch(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodPatch, url, opts...)
+}
+
+// Delete is a convenience method for making DELETE requests with retry logic.
+// It creates a DELETE request for the specified URL and executes it with the configured retry behavior.
+func (c *Client) Delete(
+	ctx context.Context,
+	url string,
+	opts ...RequestOption,
+) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodDelete, url, opts...)
+}
