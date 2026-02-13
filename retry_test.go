@@ -189,7 +189,7 @@ func TestClient_Do_Success(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestClient_Do_RetryOn500(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestClient_Do_ExhaustedRetries(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected RetryError after exhausting retries")
@@ -319,7 +319,7 @@ func TestClient_Do_ContextCancellation(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected context cancellation error")
@@ -354,7 +354,7 @@ func TestClient_Do_NoRetryOn4xx(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestClient_Do_ExponentialBackoff(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil && resp != nil {
 		resp.Body.Close()
 	}
@@ -445,7 +445,7 @@ func TestClient_Do_CustomRetryableChecker(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestWithJitter(t *testing.T) {
 	}
 
 	start := time.Now()
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil && resp != nil {
 		resp.Body.Close()
 	}
@@ -554,7 +554,7 @@ func TestWithOnRetry(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestWithRespectRetryAfter_Seconds(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestWithRespectRetryAfter_HTTPDate(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -827,7 +827,7 @@ func TestCombinedFeatures(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -877,7 +877,7 @@ func TestWithPerAttemptTimeout_Success(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -927,7 +927,7 @@ func TestWithPerAttemptTimeout_Triggered(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -972,7 +972,7 @@ func TestWithPerAttemptTimeout_Disabled(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1018,7 +1018,7 @@ func TestWithPerAttemptTimeout_WithOverallTimeout(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected context deadline error")
@@ -1052,7 +1052,7 @@ func TestWithPerAttemptTimeout_BodyReadableAfterSuccess(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(context.Background(), req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1352,7 +1352,7 @@ func TestClient_Do_ReturnsRetryErrorOnExhaustion(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected error after exhausting retries")
@@ -1409,7 +1409,7 @@ func TestClient_Do_ReturnsRetryErrorOnContextCancellation(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected error after context cancellation")
@@ -1461,7 +1461,7 @@ func TestClient_Do_ResponseBodyReadableAfterRetryExhaustion(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
 		t.Fatal("expected error after exhausting retries")
@@ -1872,5 +1872,118 @@ func TestRequestBody_LargeBody(t *testing.T) {
 
 	if attempts.Load() != 2 {
 		t.Errorf("expected 2 attempts, got %d", attempts.Load())
+	}
+}
+
+// TestClient_Do_StandardInterface tests that Do() is compatible with http.Client interface
+func TestClient_Do_StandardInterface(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(WithMaxRetries(2))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Test Do(req) - standard interface
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestClient_DoWithContext tests the explicit DoWithContext method
+func TestClient_DoWithContext(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+		if count < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(3),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Test DoWithContext(ctx, req) - explicit context control
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.DoWithContext(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	if attempts.Load() != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts.Load())
+	}
+}
+
+// TestClient_DoWithContext_ContextCancellation tests DoWithContext respects context cancellation
+func TestClient_DoWithContext_ContextCancellation(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(100*time.Millisecond),
+		WithMaxRetries(5),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := client.DoWithContext(ctx, req)
+	if err == nil {
+		defer resp.Body.Close()
+		t.Fatal("expected context cancellation error")
+	}
+
+	// Should only have 1 attempt before context is cancelled during retry delay
+	if attempts.Load() > 2 {
+		t.Errorf("expected at most 2 attempts before cancellation, got %d", attempts.Load())
 	}
 }

@@ -176,8 +176,16 @@ func (c *cancelOnCloseBody) Close() error {
 	return err
 }
 
-// Do executes an HTTP request with automatic retry logic using exponential backoff
-func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+// Do executes an HTTP request with automatic retry logic using exponential backoff.
+// This method is compatible with the standard http.Client interface.
+// The context is taken from the request via req.Context().
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	return c.DoWithContext(req.Context(), req)
+}
+
+// DoWithContext executes an HTTP request with automatic retry logic using exponential backoff.
+// Use this when you need explicit control over the context separate from the request.
+func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var resp *http.Response
 	delay := c.initialRetryDelay
@@ -329,7 +337,7 @@ func (c *Client) doRequest(
 	for _, opt := range opts {
 		opt(req)
 	}
-	return c.Do(ctx, req)
+	return c.DoWithContext(ctx, req)
 }
 
 // Get is a convenience method for making GET requests with retry logic.
