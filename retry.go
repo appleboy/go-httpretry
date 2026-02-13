@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -180,12 +181,18 @@ func (c *cancelOnCloseBody) Close() error {
 // This method is compatible with the standard http.Client interface.
 // The context is taken from the request via req.Context().
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, errors.New("retry: nil Request")
+	}
 	return c.DoWithContext(req.Context(), req)
 }
 
 // DoWithContext executes an HTTP request with automatic retry logic using exponential backoff.
 // Use this when you need explicit control over the context separate from the request.
 func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, errors.New("retry: nil Request")
+	}
 	var lastErr error
 	var resp *http.Response
 	delay := c.initialRetryDelay

@@ -1987,3 +1987,52 @@ func TestClient_DoWithContext_ContextCancellation(t *testing.T) {
 		t.Errorf("expected at most 2 attempts before cancellation, got %d", attempts.Load())
 	}
 }
+
+// TestClient_Do_NilRequest tests that Do returns an error for nil request
+func TestClient_Do_NilRequest(t *testing.T) {
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Do(nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error for nil request, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response for nil request")
+	}
+
+	expectedErrMsg := "retry: nil Request"
+	if err.Error() != expectedErrMsg {
+		t.Errorf("expected error message %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+// TestClient_DoWithContext_NilRequest tests that DoWithContext returns an error for nil request
+func TestClient_DoWithContext_NilRequest(t *testing.T) {
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	resp, err := client.DoWithContext(ctx, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error for nil request, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response for nil request")
+	}
+
+	expectedErrMsg := "retry: nil Request"
+	if err.Error() != expectedErrMsg {
+		t.Errorf("expected error message %q, got %q", expectedErrMsg, err.Error())
+	}
+}
