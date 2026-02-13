@@ -2,6 +2,7 @@ package retry
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -112,10 +113,27 @@ type RequestOption func(*http.Request)
 // WithBody sets the request body and optionally the Content-Type header.
 // If contentType is empty, no Content-Type header will be set.
 //
-// IMPORTANT: To support retries, this function buffers the entire body in memory
-// and sets up the GetBody field. This allows the request to be retried with the
-// same body content. For large request bodies, consider using the Do method directly
-// with a custom GetBody function.
+// ⚠️ MEMORY USAGE WARNING:
+// To support retries, this function buffers the ENTIRE body in memory using io.ReadAll.
+// This is ideal for small payloads like JSON/XML API requests (typically <1MB), but
+// NOT suitable for large files or streaming data.
+//
+// Size Guidelines:
+//   - ✅ Small payloads (<1MB):   Safe to use WithBody
+//   - ⚠️ Medium payloads (1-10MB): Use with caution, consider memory constraints
+//   - ❌ Large payloads (>10MB):   DO NOT use WithBody, use Do() with GetBody instead
+//
+// For large files or streaming data, use the Do() method directly with a custom
+// GetBody function that can reopen the file/stream for each retry attempt.
+// See the large_file_upload example for proper implementation.
+//
+// Example (small JSON payload):
+//
+//	jsonData := []byte(`{"user":"john"}`)
+//	resp, err := client.Post(ctx, url,
+//	    retry.WithBody("application/json", bytes.NewReader(jsonData)))
+//
+// For large files, see Do() method and the large_file_upload example instead.
 func WithBody(contentType string, body io.Reader) RequestOption {
 	return func(req *http.Request) {
 		// Buffer the entire body to support retries.
@@ -143,6 +161,64 @@ func WithBody(contentType string, body io.Reader) RequestOption {
 			req.Header.Set("Content-Type", contentType)
 		}
 	}
+}
+
+// WithJSON serializes the given value to JSON and sets it as the request body.
+// It automatically sets the Content-Type header to "application/json".
+//
+// ⚠️ MEMORY USAGE WARNING:
+// Like WithBody, this function buffers the entire JSON payload in memory to support
+// retries. This is ideal for typical API requests with small to medium JSON objects,
+// but NOT suitable for very large JSON documents.
+//
+// Size Guidelines:
+//   - ✅ Typical API payloads:  Safe to use (most API requests are <100KB)
+//   - ⚠️ Large JSON (1-10MB):   Use with caution
+//   - ❌ Very large JSON (>10MB): Use Do() with custom GetBody instead
+//
+// If JSON marshaling fails, the request will fail when executed with an error.
+//
+// Example (typical API request):
+//
+//	type User struct {
+//	    Name  string `json:"name"`
+//	    Email string `json:"email"`
+//	}
+//	user := User{Name: "John", Email: "john@example.com"}
+//	resp, err := client.Post(ctx, url, retry.WithJSON(user))
+//
+// For large JSON documents, consider streaming or use Do() with custom GetBody.
+func WithJSON(v any) RequestOption {
+	return func(req *http.Request) {
+		data, err := json.Marshal(v)
+		if err != nil {
+			// Set an error body that will fail when the request is executed.
+			// We can't return an error from RequestOption, so we defer the error
+			// to request execution time. Using a reader that returns the error
+			// ensures the request will fail immediately when trying to read the body.
+			req.Body = io.NopCloser(&errorReader{err: err})
+			req.Header.Set("Content-Type", "application/json")
+			return
+		}
+
+		// Set both Body and GetBody to support request retries
+		req.Body = io.NopCloser(bytes.NewReader(data))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+		req.ContentLength = int64(len(data))
+		req.Header.Set("Content-Type", "application/json")
+	}
+}
+
+// errorReader is an io.Reader that always returns an error.
+// Used to defer JSON marshaling errors to request execution time.
+type errorReader struct {
+	err error
+}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
 }
 
 // WithHeader sets a header key-value pair on the request.

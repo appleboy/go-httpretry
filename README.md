@@ -11,14 +11,27 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 ## Table of Contents
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Documentation](#documentation)
-- [Testing](#testing)
-- [Design Principles](#design-principles)
-- [License](#license)
-- [Author](#author)
+- [go-httpretry](#go-httpretry)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Installation](#installation)
+  - [Quick Start](#quick-start)
+    - [Basic Usage (Default Settings)](#basic-usage-default-settings)
+    - [Using Convenience Methods](#using-convenience-methods)
+    - [JSON Requests Made Easy](#json-requests-made-easy)
+    - [Custom Configuration](#custom-configuration)
+    - [Using Preset Configurations](#using-preset-configurations)
+  - [Documentation](#documentation)
+    - [Key Topics](#key-topics)
+      - [Exponential Backoff](#exponential-backoff)
+      - [Default Retry Behavior](#default-retry-behavior)
+      - [Context Support](#context-support)
+    - [Complete Working Examples](#complete-working-examples)
+    - [⚠️ Important: Large File Uploads](#️-important-large-file-uploads)
+  - [Testing](#testing)
+  - [Design Principles](#design-principles)
+  - [License](#license)
+  - [Author](#author)
 
 ## Features
 
@@ -27,6 +40,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Preset Configurations**: Ready-to-use presets for common scenarios (realtime, background, rate-limited, microservice, webhook, critical, fast-fail, etc.)
 - **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
 - **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional request configuration
+- **Request Options**: Flexible request configuration with `WithBody()`, `WithJSON()`, `WithHeader()`, and `WithHeaders()`
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
 - **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
 - **Observability Hooks**: Callback functions for logging, metrics, and custom retry logic
@@ -92,18 +106,49 @@ func main() {
 // GET request
 resp, err := client.Get(ctx, "https://api.example.com/users")
 
-// POST request with JSON body
+// POST request with JSON body (automatic marshaling)
+type User struct {
+    Name  string `json:"name"`
+    Email string `json:"email"`
+}
+user := User{Name: "John", Email: "john@example.com"}
+resp, err := client.Post(ctx, "https://api.example.com/users",
+    retry.WithJSON(user))
+
+// POST request with raw JSON body
 jsonData := bytes.NewReader([]byte(`{"name":"John"}`))
 resp, err := client.Post(ctx, "https://api.example.com/users",
     retry.WithBody("application/json", jsonData))
 
 // PUT request with custom headers
 resp, err := client.Put(ctx, "https://api.example.com/users/123",
-    retry.WithBody("application/json", jsonData),
+    retry.WithJSON(user),
     retry.WithHeader("Authorization", "Bearer token"))
 
 // DELETE request
 resp, err := client.Delete(ctx, "https://api.example.com/users/123")
+```
+
+### JSON Requests Made Easy
+
+The `WithJSON()` helper automatically marshals your data to JSON:
+
+```go
+type CreateUserRequest struct {
+    Name  string `json:"name"`
+    Email string `json:"email"`
+    Age   int    `json:"age"`
+}
+
+user := CreateUserRequest{
+    Name:  "John Doe",
+    Email: "john@example.com",
+    Age:   30,
+}
+
+// Automatically marshals to JSON and sets Content-Type header
+resp, err := client.Post(ctx, "https://api.example.com/users",
+    retry.WithJSON(user))
 ```
 
 ### Custom Configuration
@@ -226,7 +271,8 @@ For complete, runnable examples, see:
 - [\_example/basic](_example/basic) - Basic usage with default settings
 - [\_example/advanced](_example/advanced) - Advanced configuration with observability and custom retry logic
 - [\_example/convenience_methods](_example/convenience_methods) - Using convenience HTTP methods (GET, POST, PUT, DELETE, HEAD, PATCH)
-- [\_example/request_options](_example/request_options) - Request options usage (WithBody, WithHeader, WithHeaders)
+- [\_example/request_options](_example/request_options) - Request options usage (WithBody, WithJSON, WithHeader, WithHeaders)
+- [\_example/large_file_upload](_example/large_file_upload) - ⚠️ **Important**: Correct way to upload large files (>10MB) with retry support
 - `example_test.go` - Additional examples and test cases
 
 Each example can be run independently:
@@ -236,7 +282,35 @@ cd _example/basic && go run main.go
 cd _example/advanced && go run main.go
 cd _example/convenience_methods && go run main.go
 cd _example/request_options && go run main.go
+cd _example/large_file_upload && go run main.go
 ```
+
+### ⚠️ Important: Large File Uploads
+
+**Do NOT use `WithBody()` or `WithJSON()` for files larger than 10MB.** These functions buffer the entire body in memory to support retries.
+
+For large files, use the `Do()` method with a custom `GetBody` function:
+
+```go
+// ✅ CORRECT: Upload large files with retry support
+file, _ := os.Open("large-file.dat")
+req, _ := http.NewRequestWithContext(ctx, "POST", url, file)
+
+// CRITICAL: Set GetBody to reopen the file for each retry
+req.GetBody = func() (io.ReadCloser, error) {
+    return os.Open("large-file.dat")
+}
+
+resp, err := client.Do(req)
+```
+
+**Size Guidelines:**
+
+- ✅ **<1MB**: Safe to use `WithBody()` or `WithJSON()`
+- ⚠️ **1-10MB**: Use with caution, monitor memory usage
+- ❌ **>10MB**: Use `Do()` with `GetBody` (see [large_file_upload example](_example/large_file_upload))
+
+For complete patterns and best practices, see the [large_file_upload example](_example/large_file_upload) with detailed explanations.
 
 ## Testing
 

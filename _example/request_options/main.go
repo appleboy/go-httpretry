@@ -67,13 +67,42 @@ func main() {
 		fmt.Printf("Status: %d\n\n", resp.StatusCode)
 	}
 
-	// Example 5: Combining multiple options
-	fmt.Println("=== Example 5: Combining Multiple Options ===")
+	// Example 5: Using WithJSON for automatic JSON marshaling
+	fmt.Println("=== Example 5: WithJSON for Automatic Marshaling ===")
+	type RequestPayload struct {
+		Action string `json:"action"`
+		UserID int    `json:"user_id"`
+	}
+	payload := RequestPayload{Action: "update", UserID: 42}
+	resp, err = client.Post(ctx, "https://httpbin.org/post",
+		retry.WithJSON(payload))
+	if err != nil {
+		log.Printf("Request failed: %v", err)
+	} else {
+		defer resp.Body.Close()
+		fmt.Printf("Status: %d\n\n", resp.StatusCode)
+	}
+
+	// Example 6: Combining multiple options
+	fmt.Println("=== Example 6: Combining Multiple Options ===")
 	resp, err = client.Post(ctx, "https://httpbin.org/post",
 		retry.WithBody("application/json", bytes.NewReader([]byte(jsonData))),
 		retry.WithHeader("Authorization", "Bearer token"),
 		retry.WithHeader("X-Request-ID", "req-67890"),
 		retry.WithHeader("User-Agent", "go-httpretry-example"))
+	if err != nil {
+		log.Printf("Request failed: %v", err)
+	} else {
+		defer resp.Body.Close()
+		fmt.Printf("Status: %d\n\n", resp.StatusCode)
+	}
+
+	// Example 7: WithJSON combined with other options
+	fmt.Println("=== Example 7: WithJSON with Headers ===")
+	resp, err = client.Put(ctx, "https://httpbin.org/put",
+		retry.WithJSON(payload),
+		retry.WithHeader("Authorization", "Bearer secret-token"),
+		retry.WithHeader("X-Idempotency-Key", "unique-123"))
 	if err != nil {
 		log.Printf("Request failed: %v", err)
 	} else {
