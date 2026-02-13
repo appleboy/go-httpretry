@@ -306,6 +306,7 @@ func TestClient_Do_ContextCancellation(t *testing.T) {
 	client, err := NewClient(
 		WithInitialRetryDelay(100*time.Millisecond),
 		WithMaxRetries(5),
+		WithJitter(false), // Disable jitter for predictable timing
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -326,8 +327,9 @@ func TestClient_Do_ContextCancellation(t *testing.T) {
 	}
 
 	// Should only have 1 attempt before context is cancelled during retry delay
-	if attempts.Load() > 2 {
-		t.Errorf("expected at most 2 attempts before cancellation, got %d", attempts.Load())
+	// (timeout=50ms < retry_delay=100ms, so no second attempt can start)
+	if attempts.Load() != 1 {
+		t.Errorf("expected exactly 1 attempt before cancellation, got %d", attempts.Load())
 	}
 }
 
@@ -1963,6 +1965,7 @@ func TestClient_DoWithContext_ContextCancellation(t *testing.T) {
 	client, err := NewClient(
 		WithInitialRetryDelay(100*time.Millisecond),
 		WithMaxRetries(5),
+		WithJitter(false), // Disable jitter for predictable timing
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
@@ -1983,8 +1986,9 @@ func TestClient_DoWithContext_ContextCancellation(t *testing.T) {
 	}
 
 	// Should only have 1 attempt before context is cancelled during retry delay
-	if attempts.Load() > 2 {
-		t.Errorf("expected at most 2 attempts before cancellation, got %d", attempts.Load())
+	// (timeout=50ms < retry_delay=100ms, so no second attempt can start)
+	if attempts.Load() != 1 {
+		t.Errorf("expected exactly 1 attempt before cancellation, got %d", attempts.Load())
 	}
 }
 
