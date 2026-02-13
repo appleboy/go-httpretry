@@ -66,6 +66,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [Custom TLS Configuration](#custom-tls-configuration)
       - [Example: Custom CA Certificate](#example-custom-ca-certificate)
       - [Example: Skip TLS Verification (Testing Only)](#example-skip-tls-verification-testing-only)
+  - [Complete Working Examples](#complete-working-examples)
   - [Testing](#testing)
   - [Design Principles](#design-principles)
   - [License](#license)
@@ -1147,7 +1148,24 @@ client, _ := retry.NewClient(retry.WithHTTPClient(httpClient))
 - **Standard Practice**: Use Go's standard `crypto/tls` package directly
 - **Better Composability**: Works with any HTTP client configuration
 
-See `example_test.go` for complete working examples.
+## Complete Working Examples
+
+For complete, runnable examples, see:
+
+- [\_example/basic](_example/basic) - Basic usage with default settings
+- [\_example/advanced](_example/advanced) - Advanced configuration with observability and custom retry logic
+- [\_example/convenience_methods](_example/convenience_methods) - Using convenience HTTP methods (GET, POST, PUT, DELETE, HEAD, PATCH)
+- [\_example/request_options](_example/request_options) - Request options usage (WithBody, WithHeader, WithHeaders)
+- `example_test.go` - Additional examples and test cases
+
+Each example can be run independently:
+
+```bash
+cd _example/basic && go run main.go
+cd _example/advanced && go run main.go
+cd _example/convenience_methods && go run main.go
+cd _example/request_options && go run main.go
+```
 
 ## Testing
 
