@@ -59,14 +59,17 @@ func wrongWayExample(baseURL string) {
 	// Don't use WithBody for large files.
 	resp, err := client.Post(ctx, baseURL+"/upload",
 		retry.WithBody("application/octet-stream", bytes.NewReader(largeData)))
-
 	if err != nil {
 		log.Printf("❌ Upload failed: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("  Status: %d (but used %d MB of memory!)\n", resp.StatusCode, len(largeData)/(1024*1024))
+	fmt.Printf(
+		"  Status: %d (but used %d MB of memory!)\n",
+		resp.StatusCode,
+		len(largeData)/(1024*1024),
+	)
 }
 
 // rightWayExample demonstrates the CORRECT way to upload large files.
