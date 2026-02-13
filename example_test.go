@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -530,4 +531,65 @@ func Example_standardInterface() {
 	if err := executeRequest(http.DefaultClient, "https://api.example.com/data"); err != nil {
 		log.Printf("Request failed: %v", err)
 	}
+}
+
+// Example_largeFileUpload demonstrates the correct way to upload large files with retry support.
+// This is important because WithBody() buffers the entire body in memory, which is not suitable
+// for large files.
+func Example_largeFileUpload() {
+	client, err := retry.NewClient(
+		retry.WithMaxRetries(3),
+		retry.WithInitialRetryDelay(1*time.Second),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	filePath := "/path/to/large-file.dat"
+
+	// ❌ WRONG: Do NOT use WithBody for large files (buffers entire file in memory)
+	// file, _ := os.ReadFile(filePath)  // Loads entire file into memory!
+	// resp, _ := client.Post(ctx, "https://api.example.com/upload",
+	//     retry.WithBody("application/octet-stream", bytes.NewReader(file)))
+
+	// ✅ CORRECT: Use Do() with GetBody for large files (memory efficient)
+
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	// Get file info for Content-Length
+	stat, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create request with file as body
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.example.com/upload", file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = stat.Size()
+
+	// CRITICAL: Set GetBody to reopen the file for each retry attempt
+	// This enables retry support without buffering the entire file in memory
+	req.GetBody = func() (io.ReadCloser, error) {
+		return os.Open(filePath)
+	}
+
+	// Execute with automatic retry support
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Upload completed: %d\n", resp.StatusCode)
 }

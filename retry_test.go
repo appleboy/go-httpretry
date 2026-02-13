@@ -3,6 +3,7 @@ package retry
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -2038,5 +2039,283 @@ func TestClient_DoWithContext_NilRequest(t *testing.T) {
 	expectedErrMsg := "retry: nil Request"
 	if err.Error() != expectedErrMsg {
 		t.Errorf("expected error message %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+// TestWithJSON_Success tests that WithJSON correctly serializes and sends JSON
+func TestWithJSON_Success(t *testing.T) {
+	type testPayload struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+		Age   int    `json:"age"`
+	}
+
+	expectedPayload := testPayload{
+		Name:  "John Doe",
+		Email: "john@example.com",
+		Age:   30,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify Content-Type
+		contentType := r.Header.Get("Content-Type")
+		if contentType != "application/json" {
+			t.Errorf("expected Content-Type 'application/json', got %q", contentType)
+		}
+
+		// Verify body content
+		var received testPayload
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("failed to decode JSON body: %v", err)
+		}
+
+		if received != expectedPayload {
+			t.Errorf("expected payload %+v, got %+v", expectedPayload, received)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(expectedPayload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestWithJSON_WithRetry tests that JSON body is correctly sent on retries
+func TestWithJSON_WithRetry(t *testing.T) {
+	type user struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+
+	expectedUser := user{ID: 123, Name: "Alice"}
+	var attempts atomic.Int32
+	var receivedUsers []user
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := attempts.Add(1)
+
+		// Verify Content-Type on every attempt
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("attempt %d: expected Content-Type 'application/json', got %q",
+				count, r.Header.Get("Content-Type"))
+		}
+
+		// Read and decode the body
+		var received user
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("attempt %d: failed to decode JSON: %v", count, err)
+		}
+		receivedUsers = append(receivedUsers, received)
+
+		// Fail on first two attempts, succeed on third
+		if count < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithMaxRetries(3),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(expectedUser))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify we made 3 attempts
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
+	}
+
+	// CRITICAL: Verify that the JSON body was sent correctly on ALL attempts
+	for i, received := range receivedUsers {
+		if received != expectedUser {
+			t.Errorf("attempt %d: expected user %+v, got %+v", i+1, expectedUser, received)
+		}
+	}
+}
+
+// TestWithJSON_InvalidData tests that WithJSON handles unmarshallable data
+func TestWithJSON_InvalidData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Create an invalid value that cannot be marshaled to JSON
+	// (channels cannot be marshaled to JSON)
+	invalidData := make(chan int)
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(invalidData))
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+
+	// Should get an error about JSON marshaling
+	if err == nil {
+		t.Fatal("expected error for unmarshallable data, got nil")
+	}
+
+	// The error should mention JSON or unsupported type
+	errStr := err.Error()
+	if !strings.Contains(errStr, "json") && !strings.Contains(errStr, "unsupported") {
+		t.Errorf("expected error to contain 'json' or 'unsupported', got: %v", err)
+	}
+}
+
+// TestWithJSON_NilValue tests that WithJSON handles nil value
+func TestWithJSON_NilValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify Content-Type
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type 'application/json', got %q",
+				r.Header.Get("Content-Type"))
+		}
+
+		// nil marshals to "null" in JSON
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "null" {
+			t.Errorf("expected body 'null', got %q", string(body))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestWithJSON_EmptyStruct tests that WithJSON handles empty structs
+func TestWithJSON_EmptyStruct(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Empty struct marshals to "{}" in JSON
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "{}" {
+			t.Errorf("expected body '{}', got %q", string(body))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	type Empty struct{}
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(Empty{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestWithJSON_WithOtherOptions tests combining WithJSON with other request options
+func TestWithJSON_WithOtherOptions(t *testing.T) {
+	type payload struct {
+		Message string `json:"message"`
+	}
+
+	expectedPayload := payload{Message: "Hello"}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify headers
+		if r.Header.Get("Authorization") != "Bearer token123" {
+			t.Errorf("expected Authorization header, got %q",
+				r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("X-Request-ID") != "req-456" {
+			t.Errorf("expected X-Request-ID header, got %q",
+				r.Header.Get("X-Request-ID"))
+		}
+
+		// Verify Content-Type (should be set by WithJSON)
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("expected Content-Type 'application/json', got %q",
+				r.Header.Get("Content-Type"))
+		}
+
+		// Verify body
+		var received payload
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("failed to decode JSON: %v", err)
+		}
+		if received != expectedPayload {
+			t.Errorf("expected payload %+v, got %+v", expectedPayload, received)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient()
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithJSON(expectedPayload),
+		WithHeader("Authorization", "Bearer token123"),
+		WithHeader("X-Request-ID", "req-456"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
 }

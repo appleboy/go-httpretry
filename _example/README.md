@@ -56,13 +56,37 @@ go run main.go
 **Features:**
 
 - `WithBody()` - Set request body with optional Content-Type
+- `WithJSON()` - Automatic JSON marshaling
 - `WithHeader()` - Add single header
 - `WithHeaders()` - Add multiple headers
 - Combining multiple options
 
 ---
 
-### 4. Advanced Configuration
+### 4. Large File Upload
+
+**Directory:** `large_file_upload/`
+
+Demonstrates the CORRECT way to upload large files with retry support, and common pitfalls to avoid.
+
+```bash
+cd large_file_upload
+go run main.go
+```
+
+**Features:**
+
+- ❌ Wrong way: Using `WithBody()` for large files (memory inefficient)
+- ✅ Right way: Using `Do()` with custom `GetBody` function
+- File upload with retry support by reopening files
+- Streaming uploads with custom body generators
+- Memory-efficient large file handling
+
+**⚠️ Important:** Never use `WithBody()` or `WithJSON()` for files >10MB. This example shows the proper approach.
+
+---
+
+### 5. Advanced Configuration
 
 **Directory:** `advanced/`
 
@@ -91,7 +115,7 @@ To run all examples at once:
 
 ```bash
 # From the _example directory
-for dir in basic convenience_methods request_options advanced; do
+for dir in basic convenience_methods request_options large_file_upload advanced; do
     echo "=== Running $dir example ==="
     (cd $dir && go run main.go)
     echo ""
@@ -100,17 +124,19 @@ done
 
 ## Notes
 
-- All examples use `https://httpbin.org` as the test endpoint
+- All examples use `https://httpbin.org` as the test endpoint (except large_file_upload which uses a local test server)
 - Examples include error handling and proper resource cleanup
 - The advanced example demonstrates production-ready configuration
 - Some examples may show retry attempts in action when endpoints return errors
+- ⚠️ **IMPORTANT:** For large files (>10MB), always refer to the `large_file_upload/` example and use `Do()` with `GetBody` instead of `WithBody()`
 
 ## Learning Path
 
 1. Start with **basic/** to understand the core concept
 2. Move to **convenience_methods/** to learn simple HTTP methods
 3. Explore **request_options/** for flexible request configuration
-4. Study **advanced/** for production-ready patterns
+4. Read **large_file_upload/** before uploading files >10MB (⚠️ important!)
+5. Study **advanced/** for production-ready patterns
 
 ## Requirements
 

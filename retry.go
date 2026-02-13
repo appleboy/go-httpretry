@@ -180,6 +180,17 @@ func (c *cancelOnCloseBody) Close() error {
 // Do executes an HTTP request with automatic retry logic using exponential backoff.
 // This method is compatible with the standard http.Client interface.
 // The context is taken from the request via req.Context().
+//
+// For large file uploads or streaming data, set req.GetBody to enable retries:
+//
+//	file, _ := os.Open("large-file.dat")
+//	req, _ := http.NewRequestWithContext(ctx, "POST", url, file)
+//	req.GetBody = func() (io.ReadCloser, error) {
+//	    return os.Open("large-file.dat")  // Reopen for each retry
+//	}
+//	resp, err := client.Do(req)
+//
+// See the large_file_upload example for complete implementation patterns.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, errors.New("retry: nil Request")
