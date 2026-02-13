@@ -30,7 +30,7 @@ func Example_basic() {
 	}
 
 	// Execute with automatic retries
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func Example_customConfiguration() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -83,17 +83,17 @@ func Example_withTimeout() {
 		log.Fatal(err)
 	}
 
-	ctx := context.Background()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.com/data", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Set overall timeout for the operation (including retries)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp, err := client.Do(ctx, req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.com/data", nil)
+	if err != nil {
+		cancel()
+		log.Fatal(err) //nolint:gocritic // cancel() is called before Fatal
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		// May be context deadline exceeded if retries take too long
 		log.Printf("Request failed: %v", err)
@@ -132,7 +132,7 @@ func Example_customHTTPClient() {
 		log.Fatal(err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func Example_customRetryChecker() {
 		log.Fatal(err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func Example_noRetries() {
 		log.Fatal(err)
 	}
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func Example_customTLSConfiguration() {
 		nil,
 	)
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func Example_insecureTLS() {
 		nil,
 	)
 
-	resp, err := client.Do(ctx, req)
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -448,4 +448,86 @@ func Example_presetWithCustomOverride() {
 	defer resp.Body.Close()
 
 	fmt.Println("Request completed with custom realtime config")
+}
+
+// Example_doWithContext demonstrates using DoWithContext for explicit context control.
+// Use DoWithContext when you need to pass a different context than the one in the request,
+// or when you want explicit control over the context used for retries.
+func Example_doWithContext() {
+	client, err := retry.NewClient(
+		retry.WithMaxRetries(3),
+		retry.WithInitialRetryDelay(1*time.Second),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create request with background context first
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"https://api.example.com/data",
+		nil,
+	)
+	if err != nil {
+		cancel()
+		log.Fatal(err) //nolint:gocritic // cancel() is called before Fatal
+	}
+
+	// Use DoWithContext to override the request's context with our timeout context
+	resp, err := client.DoWithContext(ctx, req)
+	if err != nil {
+		log.Printf("Request failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("Status: %d\n", resp.StatusCode)
+}
+
+// Example_standardInterface demonstrates that retry.Client is compatible with http.Client interface.
+// You can use retry.Client anywhere that accepts the standard Do(req) signature.
+func Example_standardInterface() {
+	// Create retry client
+	retryClient, err := retry.NewClient(
+		retry.WithMaxRetries(3),
+		retry.WithInitialRetryDelay(1*time.Second),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Function that accepts anything with Do(*http.Request) signature
+	executeRequest := func(doer interface {
+		Do(*http.Request) (*http.Response, error)
+	}, url string,
+	) error {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := doer.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		fmt.Printf("Status: %d\n", resp.StatusCode)
+		return nil
+	}
+
+	// Works with retry.Client
+	if err := executeRequest(retryClient, "https://api.example.com/data"); err != nil {
+		log.Printf("Request failed: %v", err)
+	}
+
+	// Also works with standard http.Client
+	if err := executeRequest(http.DefaultClient, "https://api.example.com/data"); err != nil {
+		log.Printf("Request failed: %v", err)
+	}
 }
