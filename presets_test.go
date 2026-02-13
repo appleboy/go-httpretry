@@ -73,6 +73,9 @@ func TestNewBackgroundClient(t *testing.T) {
 	if client.perAttemptTimeout != 30*time.Second {
 		t.Errorf("perAttemptTimeout = %v, want 30s", client.perAttemptTimeout)
 	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
+	}
 }
 
 func TestNewBackgroundClient_WithOverride(t *testing.T) {
@@ -109,6 +112,9 @@ func TestNewRateLimitedClient(t *testing.T) {
 	}
 	if client.maxRetryDelay != 30*time.Second {
 		t.Errorf("maxRetryDelay = %v, want 30s", client.maxRetryDelay)
+	}
+	if client.perAttemptTimeout != 15*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 15s", client.perAttemptTimeout)
 	}
 	if !client.respectRetryAfter {
 		t.Error("respectRetryAfter = false, want true")
@@ -205,6 +211,12 @@ func TestNewAggressiveClient(t *testing.T) {
 	if client.maxRetryDelay != 5*time.Second {
 		t.Errorf("maxRetryDelay = %v, want 5s", client.maxRetryDelay)
 	}
+	if client.perAttemptTimeout != 10*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 10s", client.perAttemptTimeout)
+	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
+	}
 }
 
 func TestNewConservativeClient(t *testing.T) {
@@ -222,6 +234,12 @@ func TestNewConservativeClient(t *testing.T) {
 	}
 	if client.initialRetryDelay != 5*time.Second {
 		t.Errorf("initialRetryDelay = %v, want 5s", client.initialRetryDelay)
+	}
+	if client.perAttemptTimeout != 20*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 20s", client.perAttemptTimeout)
+	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
 	}
 }
 
@@ -266,6 +284,141 @@ func TestNewConservativeClient_LimitedRetries(t *testing.T) {
 	}
 }
 
+func TestNewWebhookClient(t *testing.T) {
+	client, err := NewWebhookClient()
+	if err != nil {
+		t.Fatalf("NewWebhookClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewWebhookClient() returned nil client")
+	}
+
+	// Verify configuration
+	if client.maxRetries != 1 {
+		t.Errorf("maxRetries = %d, want 1", client.maxRetries)
+	}
+	if client.initialRetryDelay != 500*time.Millisecond {
+		t.Errorf("initialRetryDelay = %v, want 500ms", client.initialRetryDelay)
+	}
+	if client.maxRetryDelay != 1*time.Second {
+		t.Errorf("maxRetryDelay = %v, want 1s", client.maxRetryDelay)
+	}
+	if client.perAttemptTimeout != 5*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 5s", client.perAttemptTimeout)
+	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
+	}
+}
+
+func TestNewCriticalClient(t *testing.T) {
+	client, err := NewCriticalClient()
+	if err != nil {
+		t.Fatalf("NewCriticalClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewCriticalClient() returned nil client")
+	}
+
+	// Verify configuration
+	if client.maxRetries != 15 {
+		t.Errorf("maxRetries = %d, want 15", client.maxRetries)
+	}
+	if client.initialRetryDelay != 1*time.Second {
+		t.Errorf("initialRetryDelay = %v, want 1s", client.initialRetryDelay)
+	}
+	if client.maxRetryDelay != 120*time.Second {
+		t.Errorf("maxRetryDelay = %v, want 120s", client.maxRetryDelay)
+	}
+	if client.retryDelayMultiple != 2.0 {
+		t.Errorf("retryDelayMultiple = %f, want 2.0", client.retryDelayMultiple)
+	}
+	if client.perAttemptTimeout != 60*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 60s", client.perAttemptTimeout)
+	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
+	}
+	if !client.respectRetryAfter {
+		t.Error("respectRetryAfter = false, want true")
+	}
+}
+
+func TestNewFastFailClient(t *testing.T) {
+	client, err := NewFastFailClient()
+	if err != nil {
+		t.Fatalf("NewFastFailClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewFastFailClient() returned nil client")
+	}
+
+	// Verify configuration
+	if client.maxRetries != 1 {
+		t.Errorf("maxRetries = %d, want 1", client.maxRetries)
+	}
+	if client.initialRetryDelay != 50*time.Millisecond {
+		t.Errorf("initialRetryDelay = %v, want 50ms", client.initialRetryDelay)
+	}
+	if client.maxRetryDelay != 200*time.Millisecond {
+		t.Errorf("maxRetryDelay = %v, want 200ms", client.maxRetryDelay)
+	}
+	if client.perAttemptTimeout != 1*time.Second {
+		t.Errorf("perAttemptTimeout = %v, want 1s", client.perAttemptTimeout)
+	}
+	if !client.jitterEnabled {
+		t.Error("jitterEnabled = false, want true")
+	}
+}
+
+func TestNewFastFailClient_FastFailure(t *testing.T) {
+	// Create a test server that always fails
+	var attemptCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attemptCount++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := NewFastFailClient()
+	if err != nil {
+		t.Fatalf("NewFastFailClient() error = %v", err)
+	}
+
+	ctx := context.Background()
+	startTime := time.Now()
+	resp, err := client.Get(ctx, server.URL)
+	elapsed := time.Since(startTime)
+
+	// Should fail with RetryError
+	var retryErr *RetryError
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("Get() expected error, got nil")
+	}
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("Get() error type = %T, want *RetryError", err)
+	}
+
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
+	// Should have made initial attempt + 1 retry = 2 total attempts
+	expectedAttempts := 2
+	if attemptCount != expectedAttempts {
+		t.Errorf("attemptCount = %d, want %d", attemptCount, expectedAttempts)
+	}
+	if retryErr.Attempts != expectedAttempts {
+		t.Errorf("RetryError.Attempts = %d, want %d", retryErr.Attempts, expectedAttempts)
+	}
+
+	// Should fail quickly (< 1 second including both attempts and delay)
+	if elapsed > 1*time.Second {
+		t.Errorf("elapsed = %v, want < 1s (fast failure)", elapsed)
+	}
+}
+
 func TestPresets_Integration(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -278,6 +431,9 @@ func TestPresets_Integration(t *testing.T) {
 		{"Microservice", NewMicroserviceClient, 3},
 		{"Aggressive", NewAggressiveClient, 10},
 		{"Conservative", NewConservativeClient, 2},
+		{"Webhook", NewWebhookClient, 1},
+		{"Critical", NewCriticalClient, 15},
+		{"FastFail", NewFastFailClient, 1},
 	}
 
 	for _, tt := range tests {

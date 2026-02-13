@@ -26,6 +26,9 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
     - [NewMicroserviceClient](#newmicroserviceclient)
     - [NewAggressiveClient](#newaggressiveclient)
     - [NewConservativeClient](#newconservativeclient)
+    - [NewWebhookClient](#newwebhookclient)
+    - [NewCriticalClient](#newcriticalclient)
+    - [NewFastFailClient](#newfastfailclient)
     - [Customizing Presets](#customizing-presets)
   - [Configuration Options](#configuration-options)
     - [`WithMaxRetries(n int)`](#withmaxretriesn-int)
@@ -76,7 +79,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
-- **Preset Configurations**: Ready-to-use presets for common scenarios (realtime, background, rate-limited, microservice, etc.)
+- **Preset Configurations**: Ready-to-use presets for common scenarios (realtime, background, rate-limited, microservice, webhook, critical, fast-fail, etc.)
 - **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
 - **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional request configuration
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
@@ -213,6 +216,7 @@ Optimized for background tasks and scheduled jobs where reliability is more impo
 - Max delay: 60s
 - Backoff multiplier: 3.0 (aggressive exponential backoff)
 - Per-attempt timeout: 30s
+- Jitter: enabled (prevent synchronized retries)
 
 **Use cases:** Batch data sync, scheduled jobs, data export/import
 
@@ -238,6 +242,7 @@ Optimized for APIs with strict rate limits. Respects server-provided `Retry-Afte
 - Max retries: 5
 - Initial delay: 2s
 - Max delay: 30s
+- Per-attempt timeout: 15s
 - Respects Retry-After header (enabled)
 - Jitter (enabled)
 
@@ -292,6 +297,8 @@ Optimized for scenarios with frequent transient failures, attempting many retrie
 - Max retries: 10 (many retry attempts)
 - Initial delay: 100ms
 - Max delay: 5s
+- Per-attempt timeout: 10s
+- Jitter: enabled (prevent synchronized retries)
 
 **Use cases:** Highly unreliable networks, services with frequent transient failures
 
@@ -316,6 +323,8 @@ Conservative approach with fewer retries and longer delays to avoid retry storms
 
 - Max retries: 2
 - Initial delay: 5s
+- Per-attempt timeout: 20s
+- Jitter: enabled (prevent synchronized retries)
 
 **Use cases:** Preventing retry storms, expensive operations, external APIs with strict limits
 
@@ -330,6 +339,106 @@ if err != nil {
     log.Fatal(err)
 }
 defer resp.Body.Close()
+```
+
+### NewWebhookClient
+
+Optimized for webhook/callback scenarios where the sender typically has its own retry mechanism, so quick failure is preferred over aggressive retries.
+
+**Configuration:**
+
+- Max retries: 1 (single retry attempt)
+- Initial delay: 500ms
+- Max delay: 1s
+- Per-attempt timeout: 5s
+- Jitter: enabled (prevent synchronized retries)
+
+**Use cases:** Sending webhooks to external services, third-party integration callbacks, event notification systems
+
+```go
+client, err := retry.NewWebhookClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Send webhook with quick failure
+webhookPayload := bytes.NewReader([]byte(`{"event":"user.created","data":{"id":123}}`))
+resp, err := client.Post(context.Background(), "https://webhook.example.com/events",
+    retry.WithBody("application/json", webhookPayload))
+if err != nil {
+    log.Printf("Webhook delivery failed: %v", err)
+    // Consider queuing for later delivery
+    return
+}
+defer resp.Body.Close()
+```
+
+### NewCriticalClient
+
+Optimized for mission-critical operations that absolutely must complete, such as payment processing or critical data synchronization.
+
+**Configuration:**
+
+- Max retries: 15 (many retry attempts for maximum reliability)
+- Initial delay: 1s
+- Max delay: 120s (up to 2 minutes between retries)
+- Backoff multiplier: 2.0 (standard exponential backoff)
+- Per-attempt timeout: 60s
+- Jitter: enabled (prevent synchronized retries)
+- Respects Retry-After header (enabled)
+
+**Use cases:** Payment processing, order confirmation, critical data synchronization, operations that cannot fail
+
+```go
+client, err := retry.NewCriticalClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Process payment with maximum retry effort
+paymentData := bytes.NewReader([]byte(`{"amount":1000,"currency":"USD"}`))
+resp, err := client.Post(context.Background(), "https://api.payment-gateway.com/charge",
+    retry.WithBody("application/json", paymentData),
+    retry.WithHeader("Authorization", "Bearer token"),
+    retry.WithHeader("Idempotency-Key", uuid.New().String()))
+if err != nil {
+    log.Fatalf("Critical payment operation failed: %v", err)
+}
+defer resp.Body.Close()
+```
+
+### NewFastFailClient
+
+Optimized for fast failure scenarios where you need to know about failures quickly, such as health checks or service discovery.
+
+**Configuration:**
+
+- Max retries: 1 (single retry attempt)
+- Initial delay: 50ms (minimal delay)
+- Max delay: 200ms (very short maximum)
+- Per-attempt timeout: 1s
+- Jitter: enabled (prevent synchronized retries)
+
+**Use cases:** Health checks, service discovery, quick availability probes, circuit breaker implementations
+
+```go
+client, err := retry.NewFastFailClient()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Quick health check with fast failure
+resp, err := client.Get(context.Background(), "http://service:8080/health")
+if err != nil {
+    log.Printf("Service unhealthy: %v", err)
+    // Open circuit breaker
+    return
+}
+defer resp.Body.Close()
+
+if resp.StatusCode == http.StatusOK {
+    log.Println("Service is healthy")
+}
 ```
 
 ### Customizing Presets
