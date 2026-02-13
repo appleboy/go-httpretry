@@ -197,6 +197,9 @@ func WithJSON(v any) RequestOption {
 			// to request execution time. Using a reader that returns the error
 			// ensures the request will fail immediately when trying to read the body.
 			req.Body = io.NopCloser(&errorReader{err: err})
+			req.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(&errorReader{err: err}), nil
+			}
 			req.Header.Set("Content-Type", "application/json")
 			return
 		}

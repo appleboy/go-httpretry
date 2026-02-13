@@ -2192,7 +2192,7 @@ func TestWithJSON_InvalidData(t *testing.T) {
 	// The error should mention JSON or unsupported type
 	errStr := err.Error()
 	if !strings.Contains(errStr, "json") && !strings.Contains(errStr, "unsupported") {
-		t.Logf("got error: %v", err)
+		t.Errorf("expected error to contain 'json' or 'unsupported', got: %v", err)
 	}
 }
 

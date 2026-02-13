@@ -87,7 +87,8 @@ The example creates a local test server, so no internet connection is needed.
 1. **`WithBody()` buffers everything in memory** - only use for small payloads
 2. **Always set `req.GetBody`** when uploading large files to enable retries
 3. **For files, reopen them** in `GetBody` - don't seek to beginning (may not work for all sources)
-4. **Test with realistic file sizes** in development to catch memory issues early
+4. **Always use `defer file.Close()`** immediately after opening files to prevent resource leaks
+5. **Test with realistic file sizes** in development to catch memory issues early
 
 ## Real-World Pattern
 
@@ -100,10 +101,10 @@ func uploadLargeFile(client *retry.Client, filePath string) error {
     if err != nil {
         return err
     }
+    defer file.Close() // Ensure file is always closed
 
     stat, err := file.Stat()
     if err != nil {
-        file.Close()
         return err
     }
 
@@ -111,7 +112,6 @@ func uploadLargeFile(client *retry.Client, filePath string) error {
     req, err := http.NewRequestWithContext(ctx, "POST",
         "https://api.example.com/upload", file)
     if err != nil {
-        file.Close()
         return err
     }
 
@@ -141,7 +141,10 @@ func uploadLargeFile(client *retry.Client, filePath string) error {
 2. **Use appropriate buffer sizes**: Default is usually fine, but you can tune for your use case
 3. **Consider compression**: For text files, compress before upload
 4. **Implement progress tracking**: Use `io.TeeReader` to track upload progress
-5. **Handle cleanup**: Always close files and response bodies
+5. **Handle cleanup properly**:
+   - Always use `defer file.Close()` immediately after opening files
+   - Always close response bodies with `defer resp.Body.Close()`
+   - Let `GetBody` return fresh `io.ReadCloser` instances that the HTTP client will close
 
 ## Common Mistakes
 

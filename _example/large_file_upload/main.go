@@ -148,16 +148,15 @@ func fileUploadExample(baseURL string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer file.Close() // Ensure file is closed after request completes
 
 	stat, err := file.Stat()
 	if err != nil {
-		file.Close()
 		log.Fatal(err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/upload", file)
 	if err != nil {
-		file.Close()
 		log.Fatal(err)
 	}
 
