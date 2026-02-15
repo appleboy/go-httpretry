@@ -102,6 +102,40 @@ func TestClient_WithLogger(t *testing.T) {
 			mockLogger.DebugLogs[0].Message,
 		)
 	}
+
+	// Verify warn log contains enhanced fields
+	warnLog := mockLogger.WarnLogs[0]
+	if warnLog.Message != "request failed, will retry" {
+		t.Errorf("Expected warn message 'request failed, will retry', got '%s'", warnLog.Message)
+	}
+
+	// Helper to find field in Args
+	findField := func(args []any, key string) bool {
+		for i := 0; i < len(args)-1; i += 2 {
+			if args[i] == key {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Verify required fields exist
+	requiredFields := []string{"method", "url", "attempt", "reason", "next_delay_ms", "elapsed_ms"}
+	for _, field := range requiredFields {
+		if !findField(warnLog.Args, field) {
+			t.Errorf("Expected warn log to contain field '%s'", field)
+		}
+	}
+
+	// Verify status field exists (server returned 500)
+	if !findField(warnLog.Args, "status") {
+		t.Errorf("Expected warn log to contain 'status' field for HTTP error")
+	}
+
+	// Verify no error field (HTTP error, not network error)
+	if findField(warnLog.Args, "error") {
+		t.Errorf("Did not expect 'error' field for HTTP status error")
+	}
 }
 
 func TestClient_DefaultLogger(t *testing.T) {

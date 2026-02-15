@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -278,6 +279,7 @@ func TestClient_Do_ExhaustedRetries(t *testing.T) {
 	// Should return the last response with 500 status
 	if resp == nil {
 		t.Fatal("expected response even with error")
+		return
 	}
 	defer resp.Body.Close()
 
@@ -1485,6 +1487,7 @@ func TestClient_Do_ResponseBodyReadableAfterRetryExhaustion(t *testing.T) {
 	// Verify response is available
 	if resp == nil {
 		t.Fatal("expected response even with error")
+		return
 	}
 	defer resp.Body.Close()
 
@@ -1829,6 +1832,172 @@ func TestRequestBody_WithRetry(t *testing.T) {
 		if body != expectedBody {
 			t.Errorf("attempt %d: expected body %q, got %q", i+1, expectedBody, body)
 		}
+	}
+}
+
+// findFieldValue is a helper function to find field value in log Args
+func findFieldValue(args []any, key string) string {
+	for i := 0; i < len(args)-1; i += 2 {
+		if args[i] == key {
+			return fmt.Sprintf("%v", args[i+1])
+		}
+	}
+	return ""
+}
+
+// TestClient_EnhancedLogging_NetworkError tests that network errors include error messages
+func TestClient_EnhancedLogging_NetworkError(t *testing.T) {
+	mockLogger := &MockLogger{}
+	client, err := NewClient(
+		WithMaxRetries(2),
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithLogger(mockLogger),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Try to connect to non-existent server
+	req, _ := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"http://127.0.0.1:1", // Invalid port
+		nil,
+	)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	_ = err // Expected to fail
+
+	// Verify warn logs contain error message
+	if len(mockLogger.WarnLogs) < 1 {
+		t.Fatalf("Expected at least 1 warn log, got %d", len(mockLogger.WarnLogs))
+	}
+
+	warnLog := mockLogger.WarnLogs[0]
+
+	// Verify error field exists and contains error message
+	errorVal := findFieldValue(warnLog.Args, "error")
+	if errorVal == "" {
+		t.Errorf("Expected 'error' field in warn log for network error")
+	}
+
+	// Verify url field exists
+	urlVal := findFieldValue(warnLog.Args, "url")
+	if urlVal == "" {
+		t.Errorf("Expected 'url' field in warn log")
+	}
+
+	// Verify time fields are in milliseconds
+	nextDelayMs := findFieldValue(warnLog.Args, "next_delay_ms")
+	if nextDelayMs == "" {
+		t.Errorf("Expected 'next_delay_ms' field in warn log")
+	}
+
+	elapsedMs := findFieldValue(warnLog.Args, "elapsed_ms")
+	if elapsedMs == "" {
+		t.Errorf("Expected 'elapsed_ms' field in warn log")
+	}
+}
+
+// TestClient_EnhancedLogging_HTTPError tests that HTTP errors include status codes
+func TestClient_EnhancedLogging_HTTPError(t *testing.T) {
+	mockLogger := &MockLogger{}
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable) // 503
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithMaxRetries(2),
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithLogger(mockLogger),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	_ = err // Expected to fail
+
+	// Verify warn logs contain status code
+	if len(mockLogger.WarnLogs) < 1 {
+		t.Fatalf("Expected at least 1 warn log, got %d", len(mockLogger.WarnLogs))
+	}
+
+	warnLog := mockLogger.WarnLogs[0]
+
+	// Verify status field exists
+	statusVal := findFieldValue(warnLog.Args, "status")
+	if statusVal != "503" {
+		t.Errorf("Expected status=503 in warn log, got '%s'", statusVal)
+	}
+
+	// Verify no error field (HTTP status, not network error)
+	errorVal := findFieldValue(warnLog.Args, "error")
+	if errorVal != "" {
+		t.Errorf("Did not expect 'error' field for HTTP status error, got '%s'", errorVal)
+	}
+
+	// Verify URL present
+	urlVal := findFieldValue(warnLog.Args, "url")
+	if !strings.Contains(urlVal, server.URL) {
+		t.Errorf("Expected url to contain server URL, got '%s'", urlVal)
+	}
+}
+
+// TestClient_EnhancedLogging_FinalFailure tests that final failure logs include enhanced fields
+func TestClient_EnhancedLogging_FinalFailure(t *testing.T) {
+	mockLogger := &MockLogger{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError) // Always fail
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		WithMaxRetries(2),
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithLogger(mockLogger),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	_ = err // Expected to fail
+
+	// Verify error logs
+	if len(mockLogger.ErrorLogs) != 1 {
+		t.Fatalf("Expected 1 error log, got %d", len(mockLogger.ErrorLogs))
+	}
+
+	errorLog := mockLogger.ErrorLogs[0]
+
+	// Verify enhanced fields
+	urlVal := findFieldValue(errorLog.Args, "url")
+	if !strings.Contains(urlVal, server.URL) {
+		t.Errorf("Expected url in error log, got '%s'", urlVal)
+	}
+
+	durationMs := findFieldValue(errorLog.Args, "duration_ms")
+	if durationMs == "" {
+		t.Errorf("Expected 'duration_ms' field in error log")
+	}
+
+	finalStatus := findFieldValue(errorLog.Args, "final_status")
+	if finalStatus != "500" {
+		t.Errorf("Expected final_status=500, got '%s'", finalStatus)
 	}
 }
 

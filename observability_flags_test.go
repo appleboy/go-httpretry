@@ -200,8 +200,8 @@ func TestClient_DoWithContext_TracerDisabled_RetryAndFailure(t *testing.T) {
 	client.tracerEnabled = false
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
 	resp, err := client.DoWithContext(context.Background(), req)
-	// We don't assert on error type or presence because behavior may vary,
-	// but we ensure no panic and properly close the response body if present.
+	_ = err // We don't assert on error as behavior may vary
+	// We ensure no panic and properly close the response body if present.
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TestClient_DelayLoggingAccuracy verifies that the logger.Warn "next_delay" value is correct
+// TestClient_DelayLoggingAccuracy verifies that the logger.Warn "next_delay_ms" value is correct
 func TestClient_DelayLoggingAccuracy(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -71,18 +71,19 @@ func TestClient_DelayLoggingAccuracy(t *testing.T) {
 				i, warnLog.Message)
 		}
 
-		// Extract next_delay from args
-		var nextDelay time.Duration
+		// Extract next_delay_ms from args
+		var nextDelayMs int64
 		for j := 0; j < len(warnLog.Args); j += 2 {
-			if warnLog.Args[j] == "next_delay" {
-				nextDelay = warnLog.Args[j+1].(time.Duration)
+			if warnLog.Args[j] == "next_delay_ms" {
+				nextDelayMs = warnLog.Args[j+1].(int64)
 				break
 			}
 		}
 
-		if nextDelay != expectedDelays[i] {
-			t.Errorf("warn log %d: expected next_delay=%v, got %v",
-				i, expectedDelays[i], nextDelay)
+		expectedMs := expectedDelays[i].Milliseconds()
+		if nextDelayMs != expectedMs {
+			t.Errorf("warn log %d: expected next_delay_ms=%v, got %v",
+				i, expectedMs, nextDelayMs)
 		}
 	}
 
@@ -247,19 +248,20 @@ func TestClient_RetryAfterDelayLogging(t *testing.T) {
 
 	warnLog := mockLogger.WarnLogs[0]
 
-	// Extract next_delay from args
-	var nextDelay time.Duration
+	// Extract next_delay_ms from args
+	var nextDelayMs int64
 	for i := 0; i < len(warnLog.Args); i += 2 {
-		if warnLog.Args[i] == "next_delay" {
-			nextDelay = warnLog.Args[i+1].(time.Duration)
+		if warnLog.Args[i] == "next_delay_ms" {
+			nextDelayMs = warnLog.Args[i+1].(int64)
 			break
 		}
 	}
 
 	// Should use Retry-After value (1 second) instead of initialRetryDelay (100ms)
 	expectedDelay := 1 * time.Second
-	if nextDelay != expectedDelay {
-		t.Errorf("expected next_delay=%v (from Retry-After), got %v", expectedDelay, nextDelay)
+	expectedMs := expectedDelay.Milliseconds()
+	if nextDelayMs != expectedMs {
+		t.Errorf("expected next_delay_ms=%v (from Retry-After), got %v", expectedMs, nextDelayMs)
 	}
 
 	// Verify Info log has matching delay

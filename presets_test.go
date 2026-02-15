@@ -16,6 +16,7 @@ func TestNewRealtimeClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewRealtimeClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -55,6 +56,7 @@ func TestNewBackgroundClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewBackgroundClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -101,6 +103,7 @@ func TestNewRateLimitedClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewRateLimitedClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -172,6 +175,7 @@ func TestNewMicroserviceClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewMicroserviceClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -199,6 +203,7 @@ func TestNewAggressiveClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewAggressiveClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -226,6 +231,7 @@ func TestNewConservativeClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewConservativeClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -291,6 +297,7 @@ func TestNewWebhookClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewWebhookClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -318,6 +325,7 @@ func TestNewCriticalClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewCriticalClient() returned nil client")
+		return
 	}
 
 	// Verify configuration
@@ -351,6 +359,7 @@ func TestNewFastFailClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("NewFastFailClient() returned nil client")
+		return
 	}
 
 	// Verify configuration

@@ -500,12 +500,27 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 			}
 
 			if c.loggerEnabled {
-				c.logger.Warn("request failed, will retry",
+				// Build base log fields
+				logFields := []any{
 					"method", req.Method,
-					"attempt", attempt+1,
+					"url", req.URL.String(),
+					"attempt", attempt + 1,
 					"reason", retryReason,
-					"next_delay", previewDelay,
-				)
+					"next_delay_ms", previewDelay.Milliseconds(),
+					"elapsed_ms", time.Since(startTime).Milliseconds(),
+				}
+
+				// Add error message if available (network errors, timeouts)
+				if lastErr != nil {
+					logFields = append(logFields, "error", lastErr.Error())
+				}
+
+				// Add HTTP status code if available (5xx, 429)
+				if resp != nil {
+					logFields = append(logFields, "status", resp.StatusCode)
+				}
+
+				c.logger.Warn("request failed, will retry", logFields...)
 			}
 
 			if c.tracerEnabled {
@@ -540,12 +555,21 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 
 	// Log failure (conditional on loggerEnabled)
 	if c.loggerEnabled {
-		c.logger.Error("request failed after all retries",
+		// Build base log fields
+		logFields := []any{
 			"method", req.Method,
-			"attempts", c.maxRetries+1,
-			"duration", totalDuration,
+			"url", req.URL.String(),
+			"attempts", c.maxRetries + 1,
+			"duration_ms", totalDuration.Milliseconds(),
 			"final_status", statusCode,
-		)
+		}
+
+		// Add final error if available
+		if lastErr != nil {
+			logFields = append(logFields, "error", lastErr.Error())
+		}
+
+		c.logger.Error("request failed after all retries", logFields...)
 	}
 
 	// Record final metrics (conditional on metricsEnabled)
