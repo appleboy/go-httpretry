@@ -37,6 +37,11 @@ type Client struct {
 	metrics MetricsCollector
 	tracer  Tracer
 	logger  Logger
+
+	// Observability optimization flags (internal use only, not exported)
+	metricsEnabled bool // true if metrics is not nopMetricsCollector
+	tracerEnabled  bool // true if tracer is not nopTracer
+	loggerEnabled  bool // true if logger is not nopLogger
 }
 
 // RetryableChecker determines if an error or response should trigger a retry
@@ -111,6 +116,17 @@ func NewClient(opts ...Option) (*Client, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
+
+	// Detect whether each observability component is enabled
+	// Use type assertion to check if the component is a no-op implementation
+	_, isNopMetrics := c.metrics.(nopMetricsCollector)
+	c.metricsEnabled = !isNopMetrics
+
+	_, isNopTracer := c.tracer.(nopTracer)
+	c.tracerEnabled = !isNopTracer
+
+	_, isNopLogger := c.logger.(nopLogger)
+	c.loggerEnabled = !isNopLogger
 
 	return c, nil
 }
@@ -268,11 +284,18 @@ func (c *Client) executeAttempt(
 ) (attemptResult, Span) {
 	attemptStart := time.Now()
 
-	// Start attempt span (no nil check needed)
-	attemptCtx, attemptSpan := c.tracer.StartSpan(ctx, "http.retry.attempt",
-		Attribute{Key: "retry.attempt", Value: attempt + 1},
-		Attribute{Key: "http.method", Value: req.Method},
-	)
+	// Start attempt span (conditional on tracerEnabled)
+	var attemptSpan Span
+	attemptCtx := ctx
+	if c.tracerEnabled {
+		attemptCtx, attemptSpan = c.tracer.StartSpan(ctx, "http.retry.attempt",
+			Attribute{Key: "retry.attempt", Value: attempt + 1},
+			Attribute{Key: "http.method", Value: req.Method},
+		)
+	} else {
+		// Return no-op span to maintain interface consistency
+		attemptSpan = nopSpan{}
+	}
 
 	// Create a per-attempt context with timeout if configured
 	var cancelAttempt context.CancelFunc
@@ -287,23 +310,27 @@ func (c *Client) executeAttempt(
 	resp, err := c.httpClient.Do(reqClone)
 	attemptDuration := time.Since(attemptStart)
 
-	// Record metrics for this attempt (no nil check needed)
+	// Record metrics for this attempt (conditional on metricsEnabled)
 	statusCode := 0
 	if resp != nil {
 		statusCode = resp.StatusCode
 	}
-	c.metrics.RecordAttempt(req.Method, statusCode, attemptDuration, err)
-
-	// Update attempt span (no nil check needed)
-	if resp != nil {
-		attemptSpan.SetAttributes(
-			Attribute{Key: "http.status_code", Value: resp.StatusCode},
-		)
+	if c.metricsEnabled {
+		c.metrics.RecordAttempt(req.Method, statusCode, attemptDuration, err)
 	}
-	if err != nil {
-		attemptSpan.SetStatus("error", err.Error())
-	} else {
-		attemptSpan.SetStatus("ok", "")
+
+	// Update attempt span (conditional on tracerEnabled)
+	if c.tracerEnabled {
+		if resp != nil {
+			attemptSpan.SetAttributes(
+				Attribute{Key: "http.status_code", Value: resp.StatusCode},
+			)
+		}
+		if err != nil {
+			attemptSpan.SetStatus("error", err.Error())
+		} else {
+			attemptSpan.SetStatus("ok", "")
+		}
 	}
 
 	return attemptResult{
@@ -338,20 +365,25 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 	var resp *http.Response
 	startTime := time.Now()
 
-	// Start outer span for entire retry operation (no nil check needed)
-	ctx, requestSpan := c.tracer.StartSpan(ctx, "http.retry.request",
-		Attribute{Key: "http.method", Value: req.Method},
-		Attribute{Key: "http.url", Value: req.URL.String()},
-		Attribute{Key: "retry.max_attempts", Value: c.maxRetries + 1},
-	)
-	defer requestSpan.End()
+	// Start outer span for entire retry operation (conditional on tracerEnabled)
+	var requestSpan Span
+	if c.tracerEnabled {
+		ctx, requestSpan = c.tracer.StartSpan(ctx, "http.retry.request",
+			Attribute{Key: "http.method", Value: req.Method},
+			Attribute{Key: "http.url", Value: req.URL.String()},
+			Attribute{Key: "retry.max_attempts", Value: c.maxRetries + 1},
+		)
+		defer requestSpan.End()
+	}
 
-	// Log request start (no nil check needed)
-	c.logger.Debug("starting request",
-		"method", req.Method,
-		"url", req.URL.String(),
-		"max_retries", c.maxRetries,
-	)
+	// Log request start (conditional on loggerEnabled)
+	if c.loggerEnabled {
+		c.logger.Debug("starting request",
+			"method", req.Method,
+			"url", req.URL.String(),
+			"max_retries", c.maxRetries,
+		)
+	}
 
 	var nextDelayBase time.Duration // Base delay for next retry (before modifiers)
 	var shouldWait bool             // Whether to wait before this attempt
@@ -378,12 +410,14 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 				})
 			}
 
-			// Log retry attempt (no nil check needed)
-			c.logger.Info("retrying request",
-				"method", req.Method,
-				"attempt", attempt+1,
-				"delay", actualDelay,
-			)
+			// Log retry attempt (conditional on loggerEnabled)
+			if c.loggerEnabled {
+				c.logger.Info("retrying request",
+					"method", req.Method,
+					"attempt", attempt+1,
+					"delay", actualDelay,
+				)
+			}
 
 			// Wait for delay
 			select {
@@ -414,19 +448,25 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 		// === PHASE 3: Check if we should retry ===
 		if !c.retryableChecker(lastErr, resp) {
 			// Success or non-retryable error
-			c.metrics.RecordRequestComplete(
-				req.Method,
-				result.statusCode,
-				time.Since(startTime),
-				attempt+1,
-				true,
-			)
-			c.logger.Debug("request completed",
-				"method", req.Method,
-				"attempts", attempt+1,
-				"duration", time.Since(startTime),
-			)
-			requestSpan.SetStatus("ok", "")
+			if c.metricsEnabled {
+				c.metrics.RecordRequestComplete(
+					req.Method,
+					result.statusCode,
+					time.Since(startTime),
+					attempt+1,
+					true,
+				)
+			}
+			if c.loggerEnabled {
+				c.logger.Debug("request completed",
+					"method", req.Method,
+					"attempts", attempt+1,
+					"duration", time.Since(startTime),
+				)
+			}
+			if c.tracerEnabled {
+				requestSpan.SetStatus("ok", "")
+			}
 
 			// Wrap the response body to cancel the per-attempt context when the body is closed
 			wrapBodyWithCancel(resp, result.cancelAttempt)
@@ -455,20 +495,26 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 
 			// Record retry decision
 			retryReason := determineRetryReason(lastErr, resp)
-			c.metrics.RecordRetry(req.Method, retryReason, attempt+1)
+			if c.metricsEnabled {
+				c.metrics.RecordRetry(req.Method, retryReason, attempt+1)
+			}
 
-			c.logger.Warn("request failed, will retry",
-				"method", req.Method,
-				"attempt", attempt+1,
-				"reason", retryReason,
-				"next_delay", previewDelay,
-			)
+			if c.loggerEnabled {
+				c.logger.Warn("request failed, will retry",
+					"method", req.Method,
+					"attempt", attempt+1,
+					"reason", retryReason,
+					"next_delay", previewDelay,
+				)
+			}
 
-			requestSpan.AddEvent("retry",
-				Attribute{Key: "retry.attempt", Value: attempt + 1},
-				Attribute{Key: "retry.reason", Value: retryReason},
-				Attribute{Key: "retry.delay_ms", Value: previewDelay.Milliseconds()},
-			)
+			if c.tracerEnabled {
+				requestSpan.AddEvent("retry",
+					Attribute{Key: "retry.attempt", Value: attempt + 1},
+					Attribute{Key: "retry.reason", Value: retryReason},
+					Attribute{Key: "retry.delay_ms", Value: previewDelay.Milliseconds()},
+				)
+			}
 
 			shouldWait = true
 
@@ -492,28 +538,34 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 		statusCode = resp.StatusCode
 	}
 
-	// Log failure (no nil check needed)
-	c.logger.Error("request failed after all retries",
-		"method", req.Method,
-		"attempts", c.maxRetries+1,
-		"duration", totalDuration,
-		"final_status", statusCode,
-	)
+	// Log failure (conditional on loggerEnabled)
+	if c.loggerEnabled {
+		c.logger.Error("request failed after all retries",
+			"method", req.Method,
+			"attempts", c.maxRetries+1,
+			"duration", totalDuration,
+			"final_status", statusCode,
+		)
+	}
 
-	// Record final metrics (no nil check needed)
-	c.metrics.RecordRequestComplete(
-		req.Method,
-		statusCode,
-		totalDuration,
-		c.maxRetries+1,
-		false,
-	)
+	// Record final metrics (conditional on metricsEnabled)
+	if c.metricsEnabled {
+		c.metrics.RecordRequestComplete(
+			req.Method,
+			statusCode,
+			totalDuration,
+			c.maxRetries+1,
+			false,
+		)
+	}
 
-	// Update request span (no nil check needed)
-	requestSpan.SetStatus("error", "max retries exceeded")
-	requestSpan.SetAttributes(
-		Attribute{Key: "retry.exhausted", Value: true},
-	)
+	// Update request span (conditional on tracerEnabled)
+	if c.tracerEnabled {
+		requestSpan.SetStatus("error", "max retries exceeded")
+		requestSpan.SetAttributes(
+			Attribute{Key: "retry.exhausted", Value: true},
+		)
+	}
 
 	// All retries exhausted - return RetryError with detailed information
 	return resp, &RetryError{
