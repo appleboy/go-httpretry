@@ -100,7 +100,10 @@ func TestClient_ObservabilityWithFailure(t *testing.T) {
 		t.Error("Expected error log to be recorded")
 	}
 	if mockLogger.ErrorLogs[0].Message != "request failed after all retries" {
-		t.Errorf("Expected error log 'request failed after all retries', got '%s'", mockLogger.ErrorLogs[0].Message)
+		t.Errorf(
+			"Expected error log 'request failed after all retries', got '%s'",
+			mockLogger.ErrorLogs[0].Message,
+		)
 	}
 }
 

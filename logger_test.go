@@ -80,7 +80,10 @@ func TestClient_WithLogger(t *testing.T) {
 
 	// Verify logs were recorded
 	if len(mockLogger.DebugLogs) < 2 {
-		t.Errorf("Expected at least 2 debug logs (start + complete), got %d", len(mockLogger.DebugLogs))
+		t.Errorf(
+			"Expected at least 2 debug logs (start + complete), got %d",
+			len(mockLogger.DebugLogs),
+		)
 	}
 
 	if len(mockLogger.InfoLogs) != 1 {
@@ -93,6 +96,9 @@ func TestClient_WithLogger(t *testing.T) {
 
 	// Verify log messages
 	if mockLogger.DebugLogs[0].Message != "starting request" {
-		t.Errorf("Expected first debug log 'starting request', got '%s'", mockLogger.DebugLogs[0].Message)
+		t.Errorf(
+			"Expected first debug log 'starting request', got '%s'",
+			mockLogger.DebugLogs[0].Message,
+		)
 	}
 }

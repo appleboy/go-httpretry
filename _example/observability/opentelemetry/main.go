@@ -21,7 +21,11 @@ func NewOTelTracer(serviceName string) *OTelTracer {
 	return &OTelTracer{serviceName: serviceName}
 }
 
-func (t *OTelTracer) StartSpan(ctx context.Context, operationName string, attrs ...retry.Attribute) (context.Context, retry.Span) {
+func (t *OTelTracer) StartSpan(
+	ctx context.Context,
+	operationName string,
+	attrs ...retry.Attribute,
+) (context.Context, retry.Span) {
 	// In production:
 	// tracer := otel.Tracer(t.serviceName)
 	// ctx, span := tracer.Start(ctx, operationName)
@@ -54,7 +58,12 @@ type OTelSpan struct {
 func (s *OTelSpan) End() {
 	duration := time.Since(s.startTime)
 	// In production: s.span.End()
-	fmt.Printf("[OpenTelemetry] Ending span: %s (duration: %v, status: %s)\n", s.name, duration, s.status)
+	fmt.Printf(
+		"[OpenTelemetry] Ending span: %s (duration: %v, status: %s)\n",
+		s.name,
+		duration,
+		s.status,
+	)
 }
 
 func (s *OTelSpan) SetAttributes(attrs ...retry.Attribute) {
@@ -64,7 +73,12 @@ func (s *OTelSpan) SetAttributes(attrs ...retry.Attribute) {
 	// }
 
 	for _, attr := range attrs {
-		fmt.Printf("[OpenTelemetry] Setting attribute on %s: %s = %v\n", s.name, attr.Key, attr.Value)
+		fmt.Printf(
+			"[OpenTelemetry] Setting attribute on %s: %s = %v\n",
+			s.name,
+			attr.Key,
+			attr.Value,
+		)
 	}
 }
 

@@ -16,14 +16,20 @@ type MetricsCollector interface {
 	RecordRetry(method string, reason string, attemptNumber int)
 
 	// RecordRequestComplete records request completion (including all retries)
-	RecordRequestComplete(method string, statusCode int, totalDuration time.Duration, totalAttempts int, success bool)
+	RecordRequestComplete(
+		method string,
+		statusCode int,
+		totalDuration time.Duration,
+		totalAttempts int,
+		success bool,
+	)
 }
 
 // nopMetricsCollector provides no-op implementation to avoid nil checks
 type nopMetricsCollector struct{}
 
-func (nopMetricsCollector) RecordAttempt(string, int, time.Duration, error) {}
-func (nopMetricsCollector) RecordRetry(string, string, int)                 {}
+func (nopMetricsCollector) RecordAttempt(string, int, time.Duration, error)             {}
+func (nopMetricsCollector) RecordRetry(string, string, int)                             {}
 func (nopMetricsCollector) RecordRequestComplete(string, int, time.Duration, int, bool) {}
 
 // defaultMetrics is the package-level singleton (internal use, not exported)

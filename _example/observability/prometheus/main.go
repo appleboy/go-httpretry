@@ -18,11 +18,11 @@ type PrometheusCollector struct {
 	mu sync.Mutex
 
 	// In production, these would be prometheus.Counter/Histogram
-	attemptsTotal    map[string]int // key: method
+	attemptsTotal    map[string]int            // key: method
 	retriesTotal     map[string]map[string]int // key: method, then reason
-	requestsTotal    map[string]map[bool]int // key: method, then success
-	attemptDurations []float64 // Would be prometheus.Histogram
-	requestDurations []float64 // Would be prometheus.Histogram
+	requestsTotal    map[string]map[bool]int   // key: method, then success
+	attemptDurations []float64                 // Would be prometheus.Histogram
+	requestDurations []float64                 // Would be prometheus.Histogram
 }
 
 func NewPrometheusCollector() *PrometheusCollector {
@@ -33,7 +33,12 @@ func NewPrometheusCollector() *PrometheusCollector {
 	}
 }
 
-func (p *PrometheusCollector) RecordAttempt(method string, statusCode int, duration time.Duration, err error) {
+func (p *PrometheusCollector) RecordAttempt(
+	method string,
+	statusCode int,
+	duration time.Duration,
+	err error,
+) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -41,8 +46,16 @@ func (p *PrometheusCollector) RecordAttempt(method string, statusCode int, durat
 	p.attemptsTotal[method]++
 	p.attemptDurations = append(p.attemptDurations, duration.Seconds())
 
-	fmt.Printf("[Prometheus] http_retry_attempts_total{method=%q,status=%d} +1\n", method, statusCode)
-	fmt.Printf("[Prometheus] http_retry_attempt_duration_seconds{method=%q} observe %.3fs\n", method, duration.Seconds())
+	fmt.Printf(
+		"[Prometheus] http_retry_attempts_total{method=%q,status=%d} +1\n",
+		method,
+		statusCode,
+	)
+	fmt.Printf(
+		"[Prometheus] http_retry_attempt_duration_seconds{method=%q} observe %.3fs\n",
+		method,
+		duration.Seconds(),
+	)
 }
 
 func (p *PrometheusCollector) RecordRetry(method string, reason string, attemptNumber int) {
@@ -58,7 +71,13 @@ func (p *PrometheusCollector) RecordRetry(method string, reason string, attemptN
 	fmt.Printf("[Prometheus] http_retry_retries_total{method=%q,reason=%q} +1\n", method, reason)
 }
 
-func (p *PrometheusCollector) RecordRequestComplete(method string, statusCode int, totalDuration time.Duration, totalAttempts int, success bool) {
+func (p *PrometheusCollector) RecordRequestComplete(
+	method string,
+	statusCode int,
+	totalDuration time.Duration,
+	totalAttempts int,
+	success bool,
+) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -74,8 +93,16 @@ func (p *PrometheusCollector) RecordRequestComplete(method string, statusCode in
 	p.requestDurations = append(p.requestDurations, totalDuration.Seconds())
 
 	fmt.Printf("[Prometheus] http_retry_requests_total{method=%q,success=%v} +1\n", method, success)
-	fmt.Printf("[Prometheus] http_retry_request_duration_seconds{method=%q} observe %.3fs\n", method, totalDuration.Seconds())
-	fmt.Printf("[Prometheus] http_retry_request_attempts{method=%q} observe %d\n", method, totalAttempts)
+	fmt.Printf(
+		"[Prometheus] http_retry_request_duration_seconds{method=%q} observe %.3fs\n",
+		method,
+		totalDuration.Seconds(),
+	)
+	fmt.Printf(
+		"[Prometheus] http_retry_request_attempts{method=%q} observe %d\n",
+		method,
+		totalAttempts,
+	)
 }
 
 func (p *PrometheusCollector) PrintMetrics() {
@@ -101,7 +128,12 @@ func (p *PrometheusCollector) PrintMetrics() {
 	fmt.Println("# TYPE http_retry_requests_total counter")
 	for method, outcomes := range p.requestsTotal {
 		for success, count := range outcomes {
-			fmt.Printf("http_retry_requests_total{method=%q,success=%v} %d\n", method, success, count)
+			fmt.Printf(
+				"http_retry_requests_total{method=%q,success=%v} %d\n",
+				method,
+				success,
+				count,
+			)
 		}
 	}
 }
@@ -148,6 +180,8 @@ func main() {
 	// Print metrics (in production, these would be exposed on /metrics endpoint)
 	promCollector.PrintMetrics()
 
-	fmt.Println("\n// In production, these metrics would be available at http://localhost:9090/metrics")
+	fmt.Println(
+		"\n// In production, these metrics would be available at http://localhost:9090/metrics",
+	)
 	fmt.Println("// and scraped by Prometheus for visualization in Grafana")
 }

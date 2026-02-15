@@ -60,7 +60,11 @@ type MockTracer struct {
 	mu    sync.Mutex
 }
 
-func (t *MockTracer) StartSpan(ctx context.Context, operationName string, attrs ...Attribute) (context.Context, Span) {
+func (t *MockTracer) StartSpan(
+	ctx context.Context,
+	operationName string,
+	attrs ...Attribute,
+) (context.Context, Span) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	span := &MockSpan{

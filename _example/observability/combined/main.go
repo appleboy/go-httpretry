@@ -24,7 +24,12 @@ type SimpleMetricsCollector struct {
 	attemptDurations []time.Duration
 }
 
-func (m *SimpleMetricsCollector) RecordAttempt(method string, statusCode int, duration time.Duration, err error) {
+func (m *SimpleMetricsCollector) RecordAttempt(
+	method string,
+	statusCode int,
+	duration time.Duration,
+	err error,
+) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.totalAttempts++
@@ -41,7 +46,13 @@ func (m *SimpleMetricsCollector) RecordRetry(method string, reason string, attem
 		method, reason, attemptNumber)
 }
 
-func (m *SimpleMetricsCollector) RecordRequestComplete(method string, statusCode int, totalDuration time.Duration, totalAttempts int, success bool) {
+func (m *SimpleMetricsCollector) RecordRequestComplete(
+	method string,
+	statusCode int,
+	totalDuration time.Duration,
+	totalAttempts int,
+	success bool,
+) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.totalDuration += totalDuration
@@ -50,8 +61,14 @@ func (m *SimpleMetricsCollector) RecordRequestComplete(method string, statusCode
 	} else {
 		m.failedReqs++
 	}
-	fmt.Printf("[METRIC] Request complete: method=%s status=%d duration=%v attempts=%d success=%v\n",
-		method, statusCode, totalDuration, totalAttempts, success)
+	fmt.Printf(
+		"[METRIC] Request complete: method=%s status=%d duration=%v attempts=%d success=%v\n",
+		method,
+		statusCode,
+		totalDuration,
+		totalAttempts,
+		success,
+	)
 }
 
 func (m *SimpleMetricsCollector) PrintSummary() {
@@ -96,7 +113,11 @@ type SimpleEvent struct {
 	attributes []retry.Attribute
 }
 
-func (t *SimpleTracer) StartSpan(ctx context.Context, operationName string, attrs ...retry.Attribute) (context.Context, retry.Span) {
+func (t *SimpleTracer) StartSpan(
+	ctx context.Context,
+	operationName string,
+	attrs ...retry.Attribute,
+) (context.Context, retry.Span) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

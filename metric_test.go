@@ -42,7 +42,12 @@ type MockMetricsCollector struct {
 	mu               sync.Mutex
 }
 
-func (m *MockMetricsCollector) RecordAttempt(method string, statusCode int, duration time.Duration, err error) {
+func (m *MockMetricsCollector) RecordAttempt(
+	method string,
+	statusCode int,
+	duration time.Duration,
+	err error,
+) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Attempts = append(m.Attempts, AttemptRecord{
@@ -63,7 +68,13 @@ func (m *MockMetricsCollector) RecordRetry(method string, reason string, attempt
 	})
 }
 
-func (m *MockMetricsCollector) RecordRequestComplete(method string, statusCode int, totalDuration time.Duration, totalAttempts int, success bool) {
+func (m *MockMetricsCollector) RecordRequestComplete(
+	method string,
+	statusCode int,
+	totalDuration time.Duration,
+	totalAttempts int,
+	success bool,
+) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.RequestsComplete = append(m.RequestsComplete, RequestCompleteRecord{
