@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -71,7 +72,7 @@ func TestClient_WithLogger(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -100,5 +101,98 @@ func TestClient_WithLogger(t *testing.T) {
 			"Expected first debug log 'starting request', got '%s'",
 			mockLogger.DebugLogs[0].Message,
 		)
+	}
+}
+
+func TestClient_DefaultLogger(t *testing.T) {
+	// This test verifies that the default logger is slog, not nopLogger
+	// We can't easily capture slog output in tests, but we can verify the client is created
+	// successfully and uses the default logger (which is slogAdapter wrapping slog.Default())
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	// Create client without WithLogger option - should use default slog
+	client, err := NewClient(
+		WithMaxRetries(3),
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithJitter(false),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Verify the default logger is slogAdapter (not nopLogger)
+	if _, ok := client.logger.(*slogAdapter); !ok {
+		t.Errorf("Expected default logger to be *slogAdapter, got %T", client.logger)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify retry happened
+	if attempts != 2 {
+		t.Errorf("Expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestClient_WithNoLogging(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	// Create client with WithNoLogging() - should disable all logging
+	client, err := NewClient(
+		WithMaxRetries(3),
+		WithInitialRetryDelay(10*time.Millisecond),
+		WithJitter(false),
+		WithNoLogging(),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Verify the logger is nopLogger
+	if _, ok := client.logger.(nopLogger); !ok {
+		t.Errorf("Expected logger to be nopLogger with WithNoLogging(), got %T", client.logger)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify retry happened (even though logging is disabled)
+	if attempts != 2 {
+		t.Errorf("Expected 2 attempts, got %d", attempts)
 	}
 }

@@ -43,7 +43,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Request Options**: Flexible request configuration with `WithBody()`, `WithJSON()`, `WithHeader()`, and `WithHeaders()`
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
 - **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
-- **Observability**: Built-in support for metrics collection, distributed tracing, and structured logging (zero dependencies, interface-driven)
+- **Observability**: Built-in support for metrics collection, distributed tracing, and structured logging (uses standard library `log/slog` by default, interface-driven for custom implementations)
 - **Flexible Configuration**: Use functional options to customize retry behavior
 - **Context Support**: Respects context cancellation and timeouts
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
@@ -86,12 +86,16 @@ func main() {
     // - 2.0x exponential multiplier
     // - Jitter enabled (±25% randomization)
     // - Retry-After header respected (HTTP standard compliant)
+    // - Structured logging to stderr using log/slog (INFO level)
     client, err := retry.NewClient()
     if err != nil {
         log.Fatal(err)
     }
 
     // Simple GET request
+    // Retry operations will be automatically logged to stderr:
+    // 2024/02/14 10:00:00 WARN request failed, will retry method=GET attempt=1 reason=5xx
+    // 2024/02/14 10:00:00 INFO retrying request method=GET attempt=2 delay=1s
     resp, err := client.Get(context.Background(), "https://api.example.com/data")
     if err != nil {
         log.Fatal(err)
