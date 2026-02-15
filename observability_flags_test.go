@@ -165,41 +165,51 @@ func (t *testLogger) Info(msg string, args ...any)  {}
 func (t *testLogger) Warn(msg string, args ...any)  {}
 func (t *testLogger) Error(msg string, args ...any) {}
 
-func TestClient_DoWithContext_TracerDisabled(t *testing.T) {
+func TestClient_DoWithContext_TracerDisabled_RetryAndFailure(t *testing.T) {
+	// Server that always returns 500 to trigger retry and failure handling.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
-
-	// Track whether tracer was called
+	// Track whether tracer was called at any point in the request lifecycle.
 	tracerCalled := false
 	customTracer := &testTracerWithCallback{
 		onStartSpan: func() { tracerCalled = true },
 	}
-
-	// Create client with tracer disabled
+	// Create client with all observability components disabled.
 	client, err := NewClient(
 		WithTracer(nil), // Explicitly disable tracer
-		WithNoLogging(),
+		WithNoLogging(), // Disable logger
 	)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-
-	// Temporarily replace tracer to detect if it's called
+	// Ensure observability flags are disabled as expected.
+	if client.metricsEnabled {
+		t.Error("Expected metricsEnabled=false when using default nop metrics collector")
+	}
+	if client.tracerEnabled {
+		t.Error("Expected tracerEnabled=false when tracer is disabled")
+	}
+	if client.loggerEnabled {
+		t.Error("Expected loggerEnabled=false when WithNoLogging() is used")
+	}
+	// Replace tracer implementation while keeping tracerEnabled=false to detect
+	// any unguarded tracer calls during retries or failure handling.
 	client.tracer = customTracer
-	client.tracerEnabled = false // Force disabled flag
-
+	client.tracerEnabled = false
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
 	resp, err := client.DoWithContext(context.Background(), req)
-	if err != nil {
-		t.Fatalf("DoWithContext() error = %v", err)
+	// We don't assert on error type or presence because behavior may vary,
+	// but we ensure no panic and properly close the response body if present.
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
 	}
-	resp.Body.Close()
-
-	// Verify tracer was NOT called
+	// Verify tracer was NOT called at any point, including during retries.
 	if tracerCalled {
-		t.Error("Expected tracer.StartSpan() not to be called when tracerEnabled = false")
+		t.Error(
+			"Expected tracer.StartSpan() not to be called when tracerEnabled = false, even on retries or failures",
+		)
 	}
 }
 
