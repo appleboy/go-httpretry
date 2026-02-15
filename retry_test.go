@@ -544,7 +544,9 @@ func TestWithOnRetry(t *testing.T) {
 
 	client, err := NewClient(
 		WithInitialRetryDelay(10*time.Millisecond),
+		WithRetryDelayMultiple(2.0),
 		WithMaxRetries(3),
+		WithJitter(false), // Disable jitter for predictable delays
 		WithOnRetry(func(info RetryInfo) {
 			retryInfos = append(retryInfos, info)
 		}),
@@ -570,7 +572,8 @@ func TestWithOnRetry(t *testing.T) {
 		t.Errorf("expected 2 retry callbacks, got %d", len(retryInfos))
 	}
 
-	// Verify retry info
+	// Verify retry info with specific delay values
+	expectedDelays := []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}
 	for i, info := range retryInfos {
 		if info.Attempt != i+1 {
 			t.Errorf("retry %d: expected attempt %d, got %d", i, i+1, info.Attempt)
@@ -578,8 +581,9 @@ func TestWithOnRetry(t *testing.T) {
 		if info.StatusCode != http.StatusInternalServerError {
 			t.Errorf("retry %d: expected status 500, got %d", i, info.StatusCode)
 		}
-		if info.Delay <= 0 {
-			t.Errorf("retry %d: expected positive delay, got %v", i, info.Delay)
+		// Verify specific delay values (no jitter)
+		if i < len(expectedDelays) && info.Delay != expectedDelays[i] {
+			t.Errorf("retry %d: expected delay %v, got %v", i, expectedDelays[i], info.Delay)
 		}
 		if info.TotalElapsed <= 0 {
 			t.Errorf("retry %d: expected positive total elapsed, got %v", i, info.TotalElapsed)
