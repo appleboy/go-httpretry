@@ -131,12 +131,22 @@ func WithTracer(tracer Tracer) Option {
 
 // WithLogger sets the structured logger for observability.
 // The logger will output structured logs for request lifecycle events.
-// If nil is provided, logging will be disabled (no-op).
+// By default, the client uses slog.Default() which outputs to stderr at INFO level.
+// Use WithNoLogging() to disable logging entirely.
 func WithLogger(logger Logger) Option {
 	return func(c *Client) {
 		if logger != nil {
 			c.logger = logger
 		}
+	}
+}
+
+// WithNoLogging disables all logging output.
+// By default, the client uses slog.Default() which outputs to stderr.
+// Use this option if you want to suppress all log messages.
+func WithNoLogging() Option {
+	return func(c *Client) {
+		c.logger = nopLogger{}
 	}
 }
 

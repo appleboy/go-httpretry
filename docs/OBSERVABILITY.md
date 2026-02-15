@@ -22,8 +22,8 @@ The library provides three observability interfaces:
 - **Logger**: Outputs structured logs for debugging and monitoring
 
 All observability features are:
-- **Optional**: Disabled by default (no-op implementations)
-- **Zero-dependency**: Interfaces only, you provide implementations
+- **Flexible**: Metrics and tracing disabled by default (no-op implementations), **logging enabled by default** using `log/slog`
+- **Zero-dependency**: Uses Go standard library only, you can provide custom implementations
 - **Zero-overhead when disabled**: Uses Null Object Pattern for negligible performance impact
 - **Thread-safe**: All callbacks must be thread-safe
 
@@ -219,19 +219,46 @@ type Logger interface {
 }
 ```
 
-### Built-in slog Adapter
+### Default Behavior
 
-For convenience, the library provides an adapter for Go's standard `log/slog`:
+**By default, the client uses `log/slog` with `slog.Default()`**, which outputs structured logs to stderr at INFO level.
+
+This means retry operations are logged automatically without any configuration:
+
+```go
+// Logging is enabled by default - no configuration needed
+client, _ := retry.NewClient()
+
+// Outputs to stderr:
+// 2024/02/14 10:00:00 WARN request failed, will retry method=GET attempt=1 reason=5xx
+// 2024/02/14 10:00:00 INFO retrying request method=GET attempt=2 delay=1s
+```
+
+### Customizing the Logger
+
+You can provide a custom logger using `WithLogger()`:
 
 ```go
 import "log/slog"
 
+// Use JSON output instead of text
 logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelDebug,
 }))
 
 client, _ := retry.NewClient(
-    retry.WithLogger(retry.NewSlogAdapter(logger)),
+    retry.WithLogger(&slogAdapter{logger: logger}),
+)
+```
+
+### Disabling Logging
+
+To suppress all log output, use `WithNoLogging()`:
+
+```go
+// Disable all logging output
+client, _ := retry.NewClient(
+    retry.WithNoLogging(),
 )
 ```
 
@@ -291,8 +318,18 @@ See `_example/observability/combined/main.go` for using all three features toget
 
 ## Performance Considerations
 
-### When Disabled (Default)
+### Default Configuration
 
+By default:
+- **Logging enabled**: Uses `log/slog.Default()` with minimal overhead for INFO+ levels
+- **Metrics disabled**: No-op implementation with zero overhead
+- **Tracing disabled**: No-op implementation with zero overhead
+
+The default slog logger has very low overhead, especially when logs are not at Debug level. For performance-critical applications where even minimal logging overhead is unacceptable, use `WithNoLogging()`.
+
+### When Observability is Disabled
+
+When using `WithNoLogging()` or not enabling metrics/tracing:
 - **Zero overhead**: No-op implementations use empty inline functions
 - **No allocations**: Null objects are package-level singletons
 - **No branches**: No `if != nil` checks in hot path
