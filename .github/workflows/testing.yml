@@ -17,7 +17,7 @@ jobs:
   lint:
     strategy:
       matrix:
-        go: [stable]
+        go: [1.25]
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} @ Go ${{ matrix.go }}
@@ -35,7 +35,7 @@ jobs:
       - name: Setup golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.7
+          version: v2.9
           args: --verbose
 
   test:
