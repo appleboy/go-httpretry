@@ -112,9 +112,10 @@ func WithPerAttemptTimeout(d time.Duration) Option {
 // If nil is provided, metrics collection will be disabled (no-op).
 func WithMetrics(collector MetricsCollector) Option {
 	return func(c *Client) {
-		if collector != nil {
-			c.metrics = collector
+		if collector == nil {
+			collector = nopMetricsCollector{}
 		}
+		c.metrics = collector
 	}
 }
 
@@ -123,21 +124,23 @@ func WithMetrics(collector MetricsCollector) Option {
 // If nil is provided, tracing will be disabled (no-op).
 func WithTracer(tracer Tracer) Option {
 	return func(c *Client) {
-		if tracer != nil {
-			c.tracer = tracer
+		if tracer == nil {
+			tracer = nopTracer{}
 		}
+		c.tracer = tracer
 	}
 }
 
 // WithLogger sets the structured logger for observability.
 // The logger will output structured logs for request lifecycle events.
 // By default, the client uses slog.Default() which outputs to stderr at INFO level.
-// Use WithNoLogging() to disable logging entirely.
+// If nil is provided, logging will be disabled (no-op), equivalent to WithNoLogging().
 func WithLogger(logger Logger) Option {
 	return func(c *Client) {
-		if logger != nil {
-			c.logger = logger
+		if logger == nil {
+			logger = nopLogger{}
 		}
+		c.logger = logger
 	}
 }
 

@@ -132,3 +132,93 @@ func TestClient_ObservabilityNoOverheadWhenDisabled(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 }
+
+func TestClient_WithMetricsNilDisablesMetrics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// First set a mock collector, then disable it with nil
+	mockMetrics := &MockMetricsCollector{}
+	client, err := NewClient(
+		WithMetrics(mockMetrics),
+		WithMetrics(nil), // This should disable metrics
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify mock metrics were NOT called (disabled by nil)
+	if len(mockMetrics.Attempts) != 0 {
+		t.Error("Expected no metrics attempts to be recorded after passing nil")
+	}
+	if len(mockMetrics.RequestsComplete) != 0 {
+		t.Error("Expected no metrics requests complete to be recorded after passing nil")
+	}
+}
+
+func TestClient_WithTracerNilDisablesTracing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// First set a mock tracer, then disable it with nil
+	mockTracer := &MockTracer{}
+	client, err := NewClient(
+		WithTracer(mockTracer),
+		WithTracer(nil), // This should disable tracing
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify mock tracer was NOT called (disabled by nil)
+	if len(mockTracer.Spans) != 0 {
+		t.Error("Expected no tracer spans to be recorded after passing nil")
+	}
+}
+
+func TestClient_WithLoggerNilDisablesLogging(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// First set a mock logger, then disable it with nil
+	mockLogger := &MockLogger{}
+	client, err := NewClient(
+		WithLogger(mockLogger),
+		WithLogger(nil), // This should disable logging
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Verify mock logger was NOT called (disabled by nil)
+	if len(mockLogger.DebugLogs) != 0 {
+		t.Error("Expected no debug logs to be recorded after passing nil")
+	}
+}
