@@ -560,11 +560,11 @@ func Example_largeFileUpload() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file.Close()
 
 	// Get file info for Content-Length
 	stat, err := file.Stat()
 	if err != nil {
+		file.Close()
 		log.Fatal(err)
 	}
 
@@ -572,6 +572,7 @@ func Example_largeFileUpload() {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.example.com/upload", file)
 	if err != nil {
+		file.Close()
 		log.Fatal(err)
 	}
 
@@ -586,6 +587,7 @@ func Example_largeFileUpload() {
 
 	// Execute with automatic retry support
 	resp, err := client.Do(req)
+	file.Close() // Close the file after making the request
 	if err != nil {
 		log.Fatal(err)
 	}

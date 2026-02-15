@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const contentTypeJSON = "application/json"
+
 func TestNewClient_Defaults(t *testing.T) {
 	client, err := NewClient()
 	if err != nil {
@@ -1196,7 +1198,7 @@ func TestClient_Post(t *testing.T) {
 	})
 
 	t.Run("with body and content type", func(t *testing.T) {
-		expectedContentType := "application/json"
+		expectedContentType := contentTypeJSON
 		expectedBody := `{"key":"value"}`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1618,7 +1620,7 @@ func TestConvenienceMethods_WithRetry(t *testing.T) {
 			var resp *http.Response
 			if tt.withBody {
 				resp, err = tt.fn(client, context.Background(), server.URL,
-					WithBody("application/json", strings.NewReader(tt.expectedBody)))
+					WithBody(contentTypeJSON, strings.NewReader(tt.expectedBody)))
 			} else {
 				resp, err = tt.fn(client, context.Background(), server.URL)
 			}
@@ -1802,7 +1804,7 @@ func TestRequestBody_WithRetry(t *testing.T) {
 
 	// Make a POST request with a JSON body
 	resp, err := client.Post(context.Background(), server.URL,
-		WithBody("application/json", strings.NewReader(expectedBody)))
+		WithBody(contentTypeJSON, strings.NewReader(expectedBody)))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2059,7 +2061,7 @@ func TestWithJSON_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify Content-Type
 		contentType := r.Header.Get("Content-Type")
-		if contentType != "application/json" {
+		if contentType != contentTypeJSON {
 			t.Errorf("expected Content-Type 'application/json', got %q", contentType)
 		}
 
@@ -2109,7 +2111,7 @@ func TestWithJSON_WithRetry(t *testing.T) {
 		count := attempts.Add(1)
 
 		// Verify Content-Type on every attempt
-		if r.Header.Get("Content-Type") != "application/json" {
+		if r.Header.Get("Content-Type") != contentTypeJSON {
 			t.Errorf("attempt %d: expected Content-Type 'application/json', got %q",
 				count, r.Header.Get("Content-Type"))
 		}
@@ -2200,7 +2202,7 @@ func TestWithJSON_InvalidData(t *testing.T) {
 func TestWithJSON_NilValue(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify Content-Type
-		if r.Header.Get("Content-Type") != "application/json" {
+		if r.Header.Get("Content-Type") != contentTypeJSON {
 			t.Errorf("expected Content-Type 'application/json', got %q",
 				r.Header.Get("Content-Type"))
 		}
@@ -2283,7 +2285,7 @@ func TestWithJSON_WithOtherOptions(t *testing.T) {
 		}
 
 		// Verify Content-Type (should be set by WithJSON)
-		if r.Header.Get("Content-Type") != "application/json" {
+		if r.Header.Get("Content-Type") != contentTypeJSON {
 			t.Errorf("expected Content-Type 'application/json', got %q",
 				r.Header.Get("Content-Type"))
 		}
