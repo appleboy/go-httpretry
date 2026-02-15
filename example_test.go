@@ -33,6 +33,9 @@ func Example_basic() {
 	// Execute with automatic retries
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -67,6 +70,9 @@ func Example_customConfiguration() {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -96,6 +102,9 @@ func Example_withTimeout() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		// May be context deadline exceeded if retries take too long
 		log.Printf("Request failed: %v", err)
 		return
@@ -135,6 +144,9 @@ func Example_customHTTPClient() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -177,6 +189,9 @@ func Example_customRetryChecker() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -202,6 +217,9 @@ func Example_noRetries() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -266,6 +284,9 @@ func Example_customTLSConfiguration() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -303,6 +324,9 @@ func Example_insecureTLS() {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -323,6 +347,9 @@ func Example_presetRealtimeClient() {
 	ctx := context.Background()
 	resp, err := client.Get(ctx, "https://api.example.com/search?q=hello")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -343,6 +370,9 @@ func Example_presetBackgroundClient() {
 	ctx := context.Background()
 	resp, err := client.Post(ctx, "https://api.example.com/batch/sync")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -363,6 +393,9 @@ func Example_presetRateLimitedClient() {
 	ctx := context.Background()
 	resp, err := client.Get(ctx, "https://api.github.com/users/appleboy")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -383,6 +416,9 @@ func Example_presetMicroserviceClient() {
 	ctx := context.Background()
 	resp, err := client.Get(ctx, "http://user-service:8080/users/123")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -403,6 +439,9 @@ func Example_presetAggressiveClient() {
 	ctx := context.Background()
 	resp, err := client.Get(ctx, "https://unreliable-api.example.com/data")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -423,6 +462,9 @@ func Example_presetConservativeClient() {
 	ctx := context.Background()
 	resp, err := client.Post(ctx, "https://api.example.com/expensive-operation")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -444,6 +486,9 @@ func Example_presetWithCustomOverride() {
 	ctx := context.Background()
 	resp, err := client.Get(ctx, "https://api.example.com/data")
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
@@ -482,6 +527,9 @@ func Example_doWithContext() {
 	// Use DoWithContext to override the request's context with our timeout context
 	resp, err := client.DoWithContext(ctx, req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Printf("Request failed: %v", err)
 		return
 	}
@@ -514,6 +562,9 @@ func Example_standardInterface() {
 
 		resp, err := doer.Do(req)
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
 			return err
 		}
 		defer resp.Body.Close()
@@ -589,6 +640,9 @@ func Example_largeFileUpload() {
 	resp, err := client.Do(req)
 	file.Close() // Close the file after making the request
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
