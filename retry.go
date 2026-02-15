@@ -415,7 +415,7 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 				c.logger.Info("retrying request",
 					"method", req.Method,
 					"attempt", attempt+1,
-					"delay", actualDelay,
+					"delay_ms", actualDelay.Milliseconds(),
 				)
 			}
 

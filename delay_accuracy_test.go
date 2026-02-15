@@ -99,19 +99,20 @@ func TestClient_DelayLoggingAccuracy(t *testing.T) {
 				i, infoLog.Message)
 		}
 
-		// Extract delay from args
-		var delay time.Duration
+		// Extract delay_ms from args
+		var delayMs int64
 		for j := 0; j < len(infoLog.Args); j += 2 {
-			if infoLog.Args[j] == "delay" {
-				delay = infoLog.Args[j+1].(time.Duration)
+			if infoLog.Args[j] == "delay_ms" {
+				delayMs = infoLog.Args[j+1].(int64)
 				break
 			}
 		}
 
 		// The delay in Info log should match the next_delay from previous Warn log
-		if delay != expectedDelays[i] {
-			t.Errorf("info log %d: expected delay=%v, got %v",
-				i, expectedDelays[i], delay)
+		expectedMs := expectedDelays[i].Milliseconds()
+		if delayMs != expectedMs {
+			t.Errorf("info log %d: expected delay_ms=%v, got %v",
+				i, expectedMs, delayMs)
 		}
 	}
 }
@@ -270,16 +271,17 @@ func TestClient_RetryAfterDelayLogging(t *testing.T) {
 	}
 
 	infoLog := mockLogger.InfoLogs[0]
-	var actualDelay time.Duration
+	var actualDelayMs int64
 	for i := 0; i < len(infoLog.Args); i += 2 {
-		if infoLog.Args[i] == "delay" {
-			actualDelay = infoLog.Args[i+1].(time.Duration)
+		if infoLog.Args[i] == "delay_ms" {
+			actualDelayMs = infoLog.Args[i+1].(int64)
 			break
 		}
 	}
 
-	if actualDelay != expectedDelay {
-		t.Errorf("expected delay=%v, got %v", expectedDelay, actualDelay)
+	// expectedMs already calculated above, reuse it
+	if actualDelayMs != expectedMs {
+		t.Errorf("expected delay_ms=%v, got %v", expectedMs, actualDelayMs)
 	}
 }
 
