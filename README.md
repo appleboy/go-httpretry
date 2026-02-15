@@ -43,7 +43,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Request Options**: Flexible request configuration with `WithBody()`, `WithJSON()`, `WithHeader()`, and `WithHeaders()`
 - **Jitter Support**: Optional random jitter to prevent thundering herd problem
 - **Retry-After Header**: Respects HTTP `Retry-After` header for rate limiting (RFC 2616)
-- **Observability Hooks**: Callback functions for logging, metrics, and custom retry logic
+- **Observability**: Built-in support for metrics collection, distributed tracing, and structured logging (zero dependencies, interface-driven)
 - **Flexible Configuration**: Use functional options to customize retry behavior
 - **Context Support**: Respects context cancellation and timeouts
 - **Custom Retry Logic**: Pluggable retry checker for custom retry conditions
@@ -205,6 +205,7 @@ For detailed documentation, please refer to:
 - **[Preset Configurations](docs/PRESETS.md)** - Pre-configured clients for common scenarios (realtime, background, rate-limited, microservice, webhook, critical, fast-fail, etc.)
 - **[Configuration Options](docs/CONFIGURATION.md)** - All available configuration options including retry behavior, HTTP client settings, custom TLS, and request options
 - **[Error Handling](docs/ERROR_HANDLING.md)** - Structured error handling with `RetryError` and response inspection
+- **[Observability](docs/OBSERVABILITY.md)** - Metrics collection, distributed tracing, and structured logging (OpenTelemetry, Prometheus, slog integration patterns)
 - **[Examples](docs/EXAMPLES.md)** - Detailed usage examples for various scenarios
 
 ### Key Topics
@@ -269,7 +270,8 @@ if err != nil {
 For complete, runnable examples, see:
 
 - [\_example/basic](_example/basic) - Basic usage with default settings
-- [\_example/advanced](_example/advanced) - Advanced configuration with observability and custom retry logic
+- [\_example/advanced](_example/advanced) - Advanced configuration with custom retry logic
+- [\_example/observability](_example/observability) - Metrics, tracing, and logging integration patterns (Prometheus, OpenTelemetry, slog)
 - [\_example/convenience_methods](_example/convenience_methods) - Using convenience HTTP methods (GET, POST, PUT, DELETE, HEAD, PATCH)
 - [\_example/request_options](_example/request_options) - Request options usage (WithBody, WithJSON, WithHeader, WithHeaders)
 - [\_example/large_file_upload](_example/large_file_upload) - ⚠️ **Important**: Correct way to upload large files (>10MB) with retry support

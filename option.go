@@ -107,6 +107,39 @@ func WithPerAttemptTimeout(d time.Duration) Option {
 	}
 }
 
+// WithMetrics sets the metrics collector for observability.
+// The collector will receive metrics events for each request attempt, retry, and completion.
+// If nil is provided, metrics collection will be disabled (no-op).
+func WithMetrics(collector MetricsCollector) Option {
+	return func(c *Client) {
+		if collector != nil {
+			c.metrics = collector
+		}
+	}
+}
+
+// WithTracer sets the distributed tracer for observability.
+// The tracer will create spans for each request and attempt, providing distributed tracing support.
+// If nil is provided, tracing will be disabled (no-op).
+func WithTracer(tracer Tracer) Option {
+	return func(c *Client) {
+		if tracer != nil {
+			c.tracer = tracer
+		}
+	}
+}
+
+// WithLogger sets the structured logger for observability.
+// The logger will output structured logs for request lifecycle events.
+// If nil is provided, logging will be disabled (no-op).
+func WithLogger(logger Logger) Option {
+	return func(c *Client) {
+		if logger != nil {
+			c.logger = logger
+		}
+	}
+}
+
 // RequestOption is a function that configures an HTTP request
 type RequestOption func(*http.Request)
 
