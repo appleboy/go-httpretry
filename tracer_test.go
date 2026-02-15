@@ -98,7 +98,7 @@ func TestClient_WithTracer(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)

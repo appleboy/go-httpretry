@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,7 +28,7 @@ func TestClient_WithAllObservability(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -68,7 +69,7 @@ func TestClient_ObservabilityWithFailure(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err == nil {
 		t.Fatal("Expected error after max retries")
@@ -119,7 +120,7 @@ func TestClient_ObservabilityNoOverheadWhenDisabled(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)

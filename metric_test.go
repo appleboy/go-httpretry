@@ -109,7 +109,7 @@ func TestClient_WithMetrics(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -165,8 +165,16 @@ func TestClient_MetricsWithNetworkError(t *testing.T) {
 	}
 
 	// Use invalid URL to trigger network error
-	req, _ := http.NewRequest(http.MethodGet, "http://invalid-domain-that-does-not-exist.com", nil)
-	_, err = client.Do(req)
+	req, _ := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"http://invalid-domain-that-does-not-exist.com",
+		nil,
+	)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("Expected network error")
 	}

@@ -208,6 +208,150 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	return c.DoWithContext(req.Context(), req)
 }
 
+// retryDelayResult contains the calculated delay and whether to continue
+type retryDelayResult struct {
+	actualDelay time.Duration
+	shouldRetry bool
+}
+
+// calculateRetryDelay computes the delay before the next retry attempt
+func (c *Client) calculateRetryDelay(
+	ctx context.Context,
+	attempt int,
+	delay time.Duration,
+	resp *http.Response,
+	lastErr error,
+	startTime time.Time,
+) (retryDelayResult, time.Duration) {
+	// Check for Retry-After header if enabled
+	var retryAfterDelay time.Duration
+	if c.respectRetryAfter && resp != nil {
+		retryAfterDelay = parseRetryAfter(resp)
+	}
+
+	// Use Retry-After if available, otherwise use exponential backoff
+	actualDelay := delay
+	if retryAfterDelay > 0 {
+		actualDelay = retryAfterDelay
+	}
+
+	// Apply jitter if enabled
+	if c.jitterEnabled {
+		actualDelay = applyJitter(actualDelay)
+	}
+
+	// Cap the delay at maxRetryDelay
+	if actualDelay > c.maxRetryDelay {
+		actualDelay = c.maxRetryDelay
+	}
+
+	// Call onRetry callback if set
+	if c.onRetryFunc != nil {
+		statusCode := 0
+		if resp != nil {
+			statusCode = resp.StatusCode
+		}
+		c.onRetryFunc(RetryInfo{
+			Attempt:      attempt,
+			Delay:        actualDelay,
+			Err:          lastErr,
+			StatusCode:   statusCode,
+			RetryAfter:   retryAfterDelay,
+			TotalElapsed: time.Since(startTime),
+		})
+	}
+
+	// Wait before retry
+	select {
+	case <-ctx.Done():
+		return retryDelayResult{actualDelay: actualDelay, shouldRetry: false}, delay
+	case <-time.After(actualDelay):
+		// Calculate next delay with exponential backoff (for next iteration)
+		nextDelay := time.Duration(float64(delay) * c.retryDelayMultiple)
+		if nextDelay > c.maxRetryDelay {
+			nextDelay = c.maxRetryDelay
+		}
+		return retryDelayResult{actualDelay: actualDelay, shouldRetry: true}, nextDelay
+	}
+}
+
+// attemptResult contains the result of executing an attempt
+type attemptResult struct {
+	resp            *http.Response
+	err             error
+	statusCode      int
+	attemptDuration time.Duration
+	cancelAttempt   context.CancelFunc
+}
+
+// executeAttempt performs a single HTTP request attempt with tracing
+func (c *Client) executeAttempt(
+	ctx context.Context,
+	req *http.Request,
+	attempt int,
+) (attemptResult, Span) {
+	attemptStart := time.Now()
+
+	// Start attempt span (no nil check needed)
+	attemptCtx, attemptSpan := c.tracer.StartSpan(ctx, "http.retry.attempt",
+		Attribute{Key: "retry.attempt", Value: attempt + 1},
+		Attribute{Key: "http.method", Value: req.Method},
+	)
+
+	// Create a per-attempt context with timeout if configured
+	var cancelAttempt context.CancelFunc
+	if c.perAttemptTimeout > 0 {
+		attemptCtx, cancelAttempt = context.WithTimeout(attemptCtx, c.perAttemptTimeout)
+	}
+
+	// Clone the request for retry (important: body might be consumed)
+	reqClone := req.Clone(attemptCtx)
+
+	//nolint:bodyclose // Response body is returned to caller who will close it
+	resp, err := c.httpClient.Do(reqClone)
+	attemptDuration := time.Since(attemptStart)
+
+	// Record metrics for this attempt (no nil check needed)
+	statusCode := 0
+	if resp != nil {
+		statusCode = resp.StatusCode
+	}
+	c.metrics.RecordAttempt(req.Method, statusCode, attemptDuration, err)
+
+	// Update attempt span (no nil check needed)
+	if resp != nil {
+		attemptSpan.SetAttributes(
+			Attribute{Key: "http.status_code", Value: resp.StatusCode},
+		)
+	}
+	if err != nil {
+		attemptSpan.SetStatus("error", err.Error())
+	} else {
+		attemptSpan.SetStatus("ok", "")
+	}
+
+	return attemptResult{
+		resp:            resp,
+		err:             err,
+		statusCode:      statusCode,
+		attemptDuration: attemptDuration,
+		cancelAttempt:   cancelAttempt,
+	}, attemptSpan
+}
+
+// wrapBodyWithCancel wraps a response body to cancel the context when closed
+func wrapBodyWithCancel(resp *http.Response, cancelAttempt context.CancelFunc) {
+	if cancelAttempt != nil && resp != nil && resp.Body != nil {
+		resp.Body = &cancelOnCloseBody{
+			ReadCloser: resp.Body,
+			cancel:     cancelAttempt,
+		}
+	} else if cancelAttempt != nil {
+		// No body to wrap, cancel immediately
+		cancelAttempt()
+	}
+}
+
 // DoWithContext executes an HTTP request with automatic retry logic using exponential backoff.
 // Use this when you need explicit control over the context separate from the request.
 func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Response, error) {
@@ -237,55 +381,13 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		var actualDelay time.Duration
 		if attempt > 0 {
-			// Check for Retry-After header if enabled
-			var retryAfterDelay time.Duration
-			if c.respectRetryAfter && resp != nil {
-				retryAfterDelay = parseRetryAfter(resp)
-			}
-
-			// Use Retry-After if available, otherwise use exponential backoff
-			actualDelay = delay
-			if retryAfterDelay > 0 {
-				actualDelay = retryAfterDelay
-			}
-
-			// Apply jitter if enabled
-			if c.jitterEnabled {
-				actualDelay = applyJitter(actualDelay)
-			}
-
-			// Cap the delay at maxRetryDelay
-			if actualDelay > c.maxRetryDelay {
-				actualDelay = c.maxRetryDelay
-			}
-
-			// Call onRetry callback if set
-			if c.onRetryFunc != nil {
-				statusCode := 0
-				if resp != nil {
-					statusCode = resp.StatusCode
-				}
-				c.onRetryFunc(RetryInfo{
-					Attempt:      attempt,
-					Delay:        actualDelay,
-					Err:          lastErr,
-					StatusCode:   statusCode,
-					RetryAfter:   retryAfterDelay,
-					TotalElapsed: time.Since(startTime),
-				})
-			}
-
-			// Log retry attempt (no nil check needed)
-			c.logger.Info("retrying request",
-				"method", req.Method,
-				"attempt", attempt+1,
-				"delay", actualDelay,
+			// Calculate and wait for retry delay
+			delayResult, nextDelay := c.calculateRetryDelay(
+				ctx, attempt, delay, resp, lastErr, startTime,
 			)
-
-			// Wait before retry
-			select {
-			case <-ctx.Done():
-				// Context cancelled - return RetryError with information about the attempts made
+			actualDelay = delayResult.actualDelay
+			if !delayResult.shouldRetry {
+				// Context cancelled during wait
 				statusCode := 0
 				if resp != nil {
 					statusCode = resp.StatusCode
@@ -296,61 +398,30 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 					LastStatus: statusCode,
 					Elapsed:    time.Since(startTime),
 				}
-			case <-time.After(actualDelay):
-				// Calculate next delay with exponential backoff (for next iteration)
-				delay = time.Duration(float64(delay) * c.retryDelayMultiple)
-				if delay > c.maxRetryDelay {
-					delay = c.maxRetryDelay
-				}
 			}
-		}
+			delay = nextDelay
 
-		attemptStart := time.Now()
-
-		// Start attempt span (no nil check needed)
-		attemptCtx, attemptSpan := c.tracer.StartSpan(ctx, "http.retry.attempt",
-			Attribute{Key: "retry.attempt", Value: attempt + 1},
-			Attribute{Key: "http.method", Value: req.Method},
-		)
-
-		// Create a per-attempt context with timeout if configured
-		var cancelAttempt context.CancelFunc
-		if c.perAttemptTimeout > 0 {
-			attemptCtx, cancelAttempt = context.WithTimeout(attemptCtx, c.perAttemptTimeout)
-		}
-
-		// Clone the request for retry (important: body might be consumed)
-		reqClone := req.Clone(attemptCtx)
-
-		resp, lastErr = c.httpClient.Do(reqClone)
-		attemptDuration := time.Since(attemptStart)
-
-		// Record metrics for this attempt (no nil check needed)
-		statusCode := 0
-		if resp != nil {
-			statusCode = resp.StatusCode
-		}
-		c.metrics.RecordAttempt(req.Method, statusCode, attemptDuration, lastErr)
-
-		// Update attempt span (no nil check needed)
-		if resp != nil {
-			attemptSpan.SetAttributes(
-				Attribute{Key: "http.status_code", Value: resp.StatusCode},
+			// Log retry attempt (no nil check needed)
+			c.logger.Info("retrying request",
+				"method", req.Method,
+				"attempt", attempt+1,
+				"delay", actualDelay,
 			)
 		}
-		if lastErr != nil {
-			attemptSpan.SetStatus("error", lastErr.Error())
-		} else {
-			attemptSpan.SetStatus("ok", "")
-		}
+
+		// Execute the attempt
+		result, attemptSpan := c.executeAttempt(ctx, req, attempt)
 		attemptSpan.End()
+
+		resp = result.resp
+		lastErr = result.err
 
 		// Check if we should retry
 		if !c.retryableChecker(lastErr, resp) {
 			// Success - record final metrics (no nil check needed)
 			c.metrics.RecordRequestComplete(
 				req.Method,
-				statusCode,
+				result.statusCode,
 				time.Since(startTime),
 				attempt+1,
 				true,
@@ -364,15 +435,7 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 
 			// Success or non-retryable error
 			// Wrap the response body to cancel the per-attempt context when the body is closed
-			if cancelAttempt != nil && resp != nil && resp.Body != nil {
-				resp.Body = &cancelOnCloseBody{
-					ReadCloser: resp.Body,
-					cancel:     cancelAttempt,
-				}
-			} else if cancelAttempt != nil {
-				// No body to wrap, cancel immediately
-				cancelAttempt()
-			}
+			wrapBodyWithCancel(resp, result.cancelAttempt)
 			return resp, lastErr
 		}
 
@@ -404,21 +467,13 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close()
 			}
-			if cancelAttempt != nil {
-				cancelAttempt()
+			if result.cancelAttempt != nil {
+				result.cancelAttempt()
 			}
 		} else {
 			// Last attempt: keep response body open but cancel per-attempt context
 			// Wrap the response body to cancel the per-attempt context when the body is closed
-			if cancelAttempt != nil && resp != nil && resp.Body != nil {
-				resp.Body = &cancelOnCloseBody{
-					ReadCloser: resp.Body,
-					cancel:     cancelAttempt,
-				}
-			} else if cancelAttempt != nil {
-				// No body to wrap, cancel immediately
-				cancelAttempt()
-			}
+			wrapBodyWithCancel(resp, result.cancelAttempt)
 		}
 	}
 
