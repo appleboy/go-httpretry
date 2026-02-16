@@ -1,27 +1,26 @@
 GO ?= go
 GOFILES := $(shell find . -type f -name "*.go")
 
-## test: run tests
-test:
+test: ## run tests
 	@$(GO) test -v -cover -coverprofile coverage.txt ./... && echo "\n==>\033[32m Ok\033[m\n" || exit 1
 
-## fmt: format go files using golangci-lint
-fmt:
+fmt: ## format go files using golangci-lint
 	@command -v golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $$($(GO) env GOPATH)/bin v2.9.0
 	golangci-lint fmt
 
-## lint: run golangci-lint to check for issues
-lint:
+lint: ## run golangci-lint to check for issues
 	@command -v golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $$($(GO) env GOPATH)/bin v2.9.0
 	golangci-lint run
 
-## clean: remove build artifacts and test coverage
-clean:
+clean: ## remove build artifacts and test coverage
 	rm -rf coverage.txt
 
 .PHONY: help test fmt lint clean
 
-## help: print this help message
-help:
-	@echo 'Usage:'
-	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
+.PHONY: help
+help: ## print this help message
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo ""
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
