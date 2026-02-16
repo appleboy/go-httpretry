@@ -1,189 +1,94 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Table of Contents
-
-- [CLAUDE.md](#claudemd)
-  - [Table of Contents](#table-of-contents)
-  - [Project Overview](#project-overview)
-  - [Architecture](#architecture)
-    - [Core Components](#core-components)
-    - [Defaults](#defaults)
-    - [Exponential Backoff](#exponential-backoff)
-    - [Per-Attempt Timeout](#per-attempt-timeout)
-  - [Testing](#testing)
-    - [Test Coverage Requirements](#test-coverage-requirements)
-  - [Development Commands](#development-commands)
-  - [CI/CD](#cicd)
-  - [Important Constraints](#important-constraints)
+Guidance for Claude Code when working with this repository.
 
 ## Project Overview
 
-`go-httpretry` is a Go library providing an HTTP client with automatic retry logic using exponential backoff. It's built using the Functional Options Pattern and has zero external dependencies beyond the Go standard library.
+`go-httpretry` is a Go library providing HTTP client with automatic retry logic using exponential backoff. Built with the Functional Options Pattern and zero external dependencies.
+
+## Important Constraints
+
+**These constraints MUST be followed:**
+
+1. **Zero dependencies** - Only use Go standard library
+2. **Testing is mandatory** - All changes MUST pass `make test && make lint` before committing
+3. **Test coverage required** - New features need tests for happy path, error cases, and edge cases
+4. **Request body handling** - Always clone requests before retry (bodies may be consumed)
+5. **Resource safety** - Close response bodies before retrying to prevent leaks
+6. **Context respect** - Never ignore context cancellation in the retry loop
+7. **No breaking changes** - The public API surface is small and stable
+8. **Avoid if-else nesting** - Prefer early returns and guard clauses:
+
+   ```go
+   // Bad: nested if-else
+   if condition {
+       // long logic
+   } else {
+       return err
+   }
+
+   // Good: early return
+   if !condition {
+       return err
+   }
+   // long logic
+   ```
+
+   Use switch statements or lookup tables for multiple conditions instead of long if-else chains.
 
 ## Architecture
 
-### Core Components
+**Core File:** `retry.go` - Single-file implementation
 
-**retry.go** - Single-file implementation containing:
+**Main Components:**
 
 - `Client` struct: HTTP client wrapper with retry configuration
-- `RetryableChecker` function type: Determines if an error/response should trigger a retry
-- Functional options pattern for configuration (`WithMaxRetries`, `WithInitialRetryDelay`, etc.)
-- `Do(ctx, req)` method: Main entry point that executes requests with exponential backoff
+- `RetryableChecker`: Function type determining if error/response should retry
+- `Do(ctx, req)`: Main entry point executing requests with exponential backoff
 
-**Key Design Patterns:**
+**Design Patterns:**
 
-- **Functional Options Pattern**: All client configuration uses `Option` functions
-- **Request Cloning**: Each retry clones the request to handle consumed request bodies
-- **Resource Management**: Response bodies are explicitly closed before retries to prevent leaks
-- **Context-Aware**: Respects context cancellation/timeouts throughout retry loop
-- **Per-Attempt Timeout**: Optional timeout for each individual attempt to prevent slow requests from exhausting retry budget
+- Functional Options Pattern for all configuration
+- Request cloning for each retry
+- Explicit response body closure before retries
+- Context-aware retry loop
+- Per-attempt timeout (optional) to prevent slow requests exhausting retry budget
 
-### Defaults
-
-The library ships with sensible defaults (see the default constants and the `NewClient` constructor in `retry.go`):
+**Default Configuration:**
 
 - Max retries: 3
-- Initial delay: 1 second
-- Max delay: 10 seconds
-- Backoff multiplier: 2.0x
-- Jitter: Enabled (±25% randomization to prevent thundering herd)
-- Retry-After: Enabled (respects HTTP Retry-After header per RFC 7231)
-- Per-attempt timeout: 0 (disabled by default, only overall context timeout applies)
-- Retry checker: `DefaultRetryableChecker` (retries on network errors, 5xx, and 429)
+- Initial delay: 1s, Max delay: 10s, Multiplier: 2.0x
+- Jitter: Enabled (±25%)
+- Retry-After: Enabled (respects RFC 7231)
+- Per-attempt timeout: Disabled (0)
+- Retry checker: `DefaultRetryableChecker` (network errors, 5xx, 429)
 
-### Exponential Backoff
+**Per-Attempt Timeout:**
 
-Implemented in the main retry loop:
+- `WithPerAttemptTimeout(duration)`: Sets timeout per individual attempt
+- Prevents slow requests from consuming all retry opportunities
+- Uses `context.WithTimeout()` for each attempt
+- When disabled (default), only overall context timeout applies
 
-1. First attempt is immediate
-2. Each retry waits: `delay = delay * multiplier` (capped at `maxRetryDelay`)
-3. Context cancellation is checked during wait periods
+## Development Workflow
 
-### Per-Attempt Timeout
-
-Optional feature that sets a timeout for each individual retry attempt:
-
-- **When enabled** (`WithPerAttemptTimeout(duration)`): Creates a child context with timeout for each attempt
-- **When disabled** (default, `perAttemptTimeout = 0`): Only the overall context timeout applies
-- **Use case**: Prevents slow individual requests from consuming all retry opportunities
-- **Implementation**: Uses `context.WithTimeout()` for each attempt, properly cancels contexts to avoid goroutine leaks
-- **Interaction with retries**: When an attempt times out, it's treated as a retryable error (network error)
-
-**Example scenario:**
-
-```txt
-Overall timeout: 30s
-Per-attempt timeout: 5s
-Max retries: 5
-
-Without per-attempt timeout:
-- Attempt 1: hangs for 30s → timeout, no retries possible
-
-With per-attempt timeout:
-- Attempt 1: times out after 5s → retry
-- Attempt 2: times out after 5s → retry
-- Attempt 3: succeeds in 2s → success
-- Total time: ~12s (5s + delay + 5s + delay + 2s)
-```
-
-## Testing
-
-**IMPORTANT: All changes MUST pass both `make test` and `make lint` before committing.**
-
-**Run all tests (recommended):**
-
-```bash
-make test
-```
-
-This runs tests with coverage and generates `coverage.txt`.
-
-**Run linting:**
-
-```bash
-make lint
-```
-
-**Run both (required before commit):**
+**Required before commit:**
 
 ```bash
 make test && make lint
 ```
 
-**Run tests manually:**
+**Common commands:**
 
 ```bash
-go test -v ./...
+make test              # Run tests with coverage
+make lint              # Run golangci-lint
+make fmt               # Format code
+go test -v -run Name   # Run specific test
 ```
 
-**Run tests with coverage:**
+**Test Coverage Requirements:**
 
-```bash
-go test -v -cover ./...
-```
-
-**Run specific test:**
-
-```bash
-go test -v -run TestName
-```
-
-### Test Coverage Requirements
-
-- **Every code change MUST include corresponding tests**
-- **New functions require test cases** covering:
-  - Happy path (normal operation)
-  - Error cases (invalid inputs, network failures)
-  - Edge cases (nil values, timeouts, context cancellation)
-- **Bug fixes MUST include a regression test** that reproduces the bug before the fix
-
-## Development Commands
-
-**Linting:**
-
-```bash
-make lint
-```
-
-Or run golangci-lint directly:
-
-```bash
-golangci-lint run --verbose
-```
-
-**Format code:**
-
-```bash
-make fmt
-```
-
-**Clean build artifacts:**
-
-```bash
-rm -rf coverage.txt
-```
-
-**No build required** - this is a library package, not a binary.
-
-## CI/CD
-
-- **testing.yml**: Runs lints and tests on Go 1.24-1.25 across Ubuntu and macOS
-- **goreleaser.yml**: Publishes releases on git tags
-- **security.yml**: Daily Trivy security scans
-- **codeql.yml**: Static analysis on push/PR
-
-## Important Constraints
-
-1. **Zero dependencies** - Only use Go standard library
-2. **No breaking changes to functional options** - The public API surface is small and stable
-3. **Request body handling** - Always clone requests before retry (request bodies may be consumed)
-4. **Resource safety** - Close response bodies before retrying to prevent leaks
-5. **Context respect** - Never ignore context cancellation in the retry loop
-6. **Testing is mandatory** - All changes MUST:
-   - Pass `make test` and `make lint` before committing
-   - Include corresponding test cases for new functionality
-   - Include regression tests for bug fixes
-   - Maintain or improve test coverage
+- Every code change needs corresponding tests
+- Cover happy path, error cases, edge cases
+- Bug fixes need regression tests
