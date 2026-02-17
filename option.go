@@ -153,6 +153,76 @@ func WithNoLogging() Option {
 	}
 }
 
+// WithPerAttemptMiddleware adds middleware that wraps the http.RoundTripper.
+// Per-attempt middleware executes for EVERY HTTP call including retries.
+// Multiple calls to this option will append middleware to the chain.
+//
+// Middleware is applied in the order added: first middleware is outermost.
+// For example:
+//
+//	retry.NewClient(
+//	    retry.WithPerAttemptMiddleware(LoggingMiddleware),     // Executes first
+//	    retry.WithPerAttemptMiddleware(HeaderMiddleware),      // Executes second
+//	)
+//
+// The middleware wraps the Transport, not modifies it, so it's safe for concurrent use.
+// If your middleware needs to modify the request, clone it first:
+//
+//	func MyMiddleware(next http.RoundTripper) http.RoundTripper {
+//	    return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+//	        req = req.Clone(req.Context())  // Clone before modifying
+//	        req.Header.Set("X-Custom", "value")
+//	        return next.RoundTrip(req)
+//	    })
+//	}
+//
+// Common use cases:
+//   - Per-attempt logging (logs each retry)
+//   - Adding/modifying headers for each attempt
+//   - Fine-grained distributed tracing (span per attempt)
+//   - Request/response inspection and modification
+func WithPerAttemptMiddleware(middleware ...Middleware) Option {
+	return func(c *Client) {
+		c.perAttemptMiddleware = append(c.perAttemptMiddleware, middleware...)
+	}
+}
+
+// WithRequestMiddleware adds middleware that wraps the entire retry operation.
+// Request-level middleware executes ONCE per client call, regardless of retry count.
+// Multiple calls to this option will append middleware to the chain.
+//
+// Middleware is applied in the order added: first middleware is outermost.
+// For example:
+//
+//	retry.NewClient(
+//	    retry.WithRequestMiddleware(RateLimitMiddleware),   // Executes first
+//	    retry.WithRequestMiddleware(CircuitBreakerMiddleware), // Executes second
+//	)
+//
+// Request middleware can:
+//   - Execute logic before/after the entire retry loop
+//   - Short-circuit retry logic (e.g., circuit breaker open)
+//   - Add request-level tracing spans
+//   - Implement rate limiting or caching
+//
+// Example rate limiting middleware:
+//
+//	func RateLimitMiddleware(limiter RateLimiter) RequestMiddleware {
+//	    return func(next RetryFunc) RetryFunc {
+//	        return func(ctx context.Context, req *http.Request) (*http.Response, error) {
+//	            if err := limiter.Wait(ctx); err != nil {
+//	                return nil, err
+//	            }
+//	            return next(ctx, req)
+//	        }
+//	    }
+//	}
+func WithRequestMiddleware(middleware ...RequestMiddleware) Option {
+	return func(c *Client) {
+		c.requestMiddleware = append(c.requestMiddleware, middleware...)
+	}
+}
+
 // RequestOption is a function that configures an HTTP request
 type RequestOption func(*http.Request)
 

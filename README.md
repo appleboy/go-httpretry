@@ -26,6 +26,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
       - [Exponential Backoff](#exponential-backoff)
       - [Default Retry Behavior](#default-retry-behavior)
       - [Context Support](#context-support)
+      - [Middleware](#middleware)
     - [Complete Working Examples](#complete-working-examples)
     - [⚠️ Important: Large File Uploads](#️-important-large-file-uploads)
   - [Testing](#testing)
@@ -38,6 +39,7 @@ A flexible HTTP client with automatic retry logic using exponential backoff, bui
 - **Automatic Retries**: Retries failed requests with configurable exponential backoff
 - **Smart Retry Logic**: Default retries on network errors, 5xx server errors, and 429 (Too Many Requests)
 - **Preset Configurations**: Ready-to-use presets for common scenarios (realtime, background, rate-limited, microservice, webhook, critical, fast-fail, etc.)
+- **Middleware Support**: Two-level middleware system for per-attempt and request-level customization (rate limiting, circuit breaking, logging, tracing)
 - **Structured Error Types**: Rich error information with `RetryError` for programmatic error inspection
 - **Convenience Methods**: Simple HTTP methods (Get, Post, Put, Patch, Delete, Head) with optional request configuration
 - **Request Options**: Flexible request configuration with `WithBody()`, `WithJSON()`, `WithHeader()`, and `WithHeaders()`
@@ -208,6 +210,7 @@ For detailed documentation, please refer to:
 
 - **[Preset Configurations](docs/PRESETS.md)** - Pre-configured clients for common scenarios (realtime, background, rate-limited, microservice, webhook, critical, fast-fail, etc.)
 - **[Configuration Options](docs/CONFIGURATION.md)** - All available configuration options including retry behavior, HTTP client settings, custom TLS, and request options
+- **[Middleware](docs/MIDDLEWARE.md)** - Two-level middleware system for per-attempt and request-level customization (rate limiting, circuit breaking, logging, custom behaviors)
 - **[Error Handling](docs/ERROR_HANDLING.md)** - Structured error handling with `RetryError` and response inspection
 - **[Observability](docs/OBSERVABILITY.md)** - Metrics collection, distributed tracing, and structured logging (OpenTelemetry, Prometheus, slog integration patterns)
 - **[Examples](docs/EXAMPLES.md)** - Detailed usage examples for various scenarios
@@ -269,12 +272,43 @@ if err != nil {
 }
 ```
 
+#### Middleware
+
+The library supports a two-level middleware system for adding custom behavior:
+
+**Per-Attempt Middleware** - Executes for **every HTTP attempt** including retries:
+
+```go
+client, _ := retry.NewClient(
+    retry.WithPerAttemptMiddleware(
+        retry.LoggingMiddleware(myLogger),        // Logs each attempt
+        retry.HeaderMiddleware(map[string]string{ // Adds headers per attempt
+            "X-Client-Version": "1.0",
+        }),
+    ),
+)
+```
+
+**Request-Level Middleware** - Executes **once per client call**, wrapping the entire retry operation:
+
+```go
+client, _ := retry.NewClient(
+    retry.WithRequestMiddleware(
+        retry.RateLimitMiddleware(myRateLimiter),         // Rate limits entire operation
+        retry.CircuitBreakerMiddleware(myCircuitBreaker), // Protects from cascading failures
+    ),
+)
+```
+
+For detailed documentation, custom middleware examples, and best practices, see [Middleware Documentation](docs/MIDDLEWARE.md) and [\_example/middleware](_example/middleware).
+
 ### Complete Working Examples
 
 For complete, runnable examples, see:
 
 - [\_example/basic](_example/basic) - Basic usage with default settings
 - [\_example/advanced](_example/advanced) - Advanced configuration with custom retry logic
+- [\_example/middleware](_example/middleware) - Per-attempt and request-level middleware patterns (logging, rate limiting, circuit breaking)
 - [\_example/observability](_example/observability) - Metrics, tracing, and logging integration patterns (Prometheus, OpenTelemetry, slog)
 - [\_example/convenience_methods](_example/convenience_methods) - Using convenience HTTP methods (GET, POST, PUT, DELETE, HEAD, PATCH)
 - [\_example/request_options](_example/request_options) - Request options usage (WithBody, WithJSON, WithHeader, WithHeaders)
@@ -286,6 +320,8 @@ Each example can be run independently:
 ```bash
 cd _example/basic && go run main.go
 cd _example/advanced && go run main.go
+cd _example/middleware && go run main.go
+cd _example/observability && go run main.go
 cd _example/convenience_methods && go run main.go
 cd _example/request_options && go run main.go
 cd _example/large_file_upload && go run main.go

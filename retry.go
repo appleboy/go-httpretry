@@ -19,6 +19,52 @@ const (
 	defaultRetryDelayMultiple = 2.0
 )
 
+// Middleware wraps an http.RoundTripper to add custom behavior per HTTP attempt.
+// Per-attempt middleware executes for EVERY HTTP call including retries.
+// Example use cases: per-attempt logging, request modification, distributed tracing spans.
+//
+// Middleware must be safe for concurrent use as the wrapped RoundTripper may be
+// shared across goroutines. If your middleware needs to modify the request,
+// clone it first: req = req.Clone(req.Context())
+//
+// Example logging middleware:
+//
+//	func LoggingMiddleware(next http.RoundTripper) http.RoundTripper {
+//	    return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+//	        log.Printf("Attempt: %s %s", req.Method, req.URL)
+//	        return next.RoundTrip(req)
+//	    })
+//	}
+type Middleware func(http.RoundTripper) http.RoundTripper
+
+// RequestMiddleware wraps the entire retry operation to add custom behavior.
+// Request-level middleware executes ONCE per client call, regardless of retry count.
+// Example use cases: rate limiting, circuit breaking, request-level tracing, caching.
+//
+// Request middleware receives the full retry logic as a RetryFunc and can:
+// - Execute logic before/after the entire retry loop
+// - Short-circuit the retry logic entirely
+// - Modify context or request before passing to retry logic
+//
+// Example rate limiting middleware:
+//
+//	func RateLimitMiddleware(limiter RateLimiter) RequestMiddleware {
+//	    return func(next RetryFunc) RetryFunc {
+//	        return func(ctx context.Context, req *http.Request) (*http.Response, error) {
+//	            if err := limiter.Wait(ctx); err != nil {
+//	                return nil, err
+//	            }
+//	            return next(ctx, req)
+//	        }
+//	    }
+//	}
+type RequestMiddleware func(RetryFunc) RetryFunc
+
+// RetryFunc represents the core retry operation: executing an HTTP request with retry logic.
+// It takes a context and request, and returns a response and error.
+// This type is used by RequestMiddleware to wrap the retry behavior.
+type RetryFunc func(context.Context, *http.Request) (*http.Response, error)
+
 // Client is an HTTP client with automatic retry logic using exponential backoff
 type Client struct {
 	maxRetries         int
@@ -42,6 +88,10 @@ type Client struct {
 	metricsEnabled bool // true if metrics is not nopMetricsCollector
 	tracerEnabled  bool // true if tracer is not nopTracer
 	loggerEnabled  bool // true if logger is not nopLogger
+
+	// Middleware chains
+	perAttemptMiddleware []Middleware        // Applied to each HTTP attempt (wraps Transport)
+	requestMiddleware    []RequestMiddleware // Applied to entire retry operation
 }
 
 // RetryableChecker determines if an error or response should trigger a retry
@@ -127,6 +177,26 @@ func NewClient(opts ...Option) (*Client, error) {
 
 	_, isNopLogger := c.logger.(nopLogger)
 	c.loggerEnabled = !isNopLogger
+
+	// Apply per-attempt middleware to Transport
+	if len(c.perAttemptMiddleware) > 0 {
+		transport := c.httpClient.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+
+		// Chain middleware from last to first (first middleware is outermost)
+		// Note: We wrap the Transport, not modify it - middleware pattern is non-invasive
+		for i := len(c.perAttemptMiddleware) - 1; i >= 0; i-- {
+			transport = c.perAttemptMiddleware[i](transport)
+		}
+
+		// Shallow copy http.Client to avoid mutating user's client
+		// This copies all fields automatically (future-proof)
+		newClient := *c.httpClient
+		newClient.Transport = transport
+		c.httpClient = &newClient
+	}
 
 	return c, nil
 }
@@ -361,6 +431,21 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 	if req == nil {
 		return nil, errors.New("retry: nil Request")
 	}
+
+	// Build retry function
+	retryFunc := c.doWithRetry
+
+	// Apply request-level middleware (from last to first)
+	for i := len(c.requestMiddleware) - 1; i >= 0; i-- {
+		retryFunc = c.requestMiddleware[i](retryFunc)
+	}
+
+	return retryFunc(ctx, req)
+}
+
+// doWithRetry contains the core retry logic (extracted from DoWithContext).
+// This separation allows request-level middleware to wrap the entire retry operation.
+func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var resp *http.Response
 	startTime := time.Now()
