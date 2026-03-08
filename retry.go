@@ -470,15 +470,14 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 		)
 	}
 
-	var nextDelayBase time.Duration // Base delay for next retry (before modifiers)
-	var shouldWait bool             // Whether to wait before this attempt
+	var nextDelayBase time.Duration   // Base delay for next retry (before modifiers)
+	var nextActualDelay time.Duration // Actual delay (after Retry-After, jitter, cap)
+	var nextRetryAfter time.Duration  // Retry-After duration from response header
+	var shouldWait bool               // Whether to wait before this attempt
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		// === PHASE 1: Wait for delay (if retrying) ===
 		if shouldWait && attempt > 0 {
-			// Apply Retry-After, jitter, cap
-			actualDelay, retryAfterDelay := c.applyDelayModifiers(nextDelayBase, resp)
-
 			// Call onRetry callback
 			if c.onRetryFunc != nil {
 				statusCode := 0
@@ -487,10 +486,10 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				}
 				c.onRetryFunc(RetryInfo{
 					Attempt:      attempt,
-					Delay:        actualDelay,
+					Delay:        nextActualDelay,
 					Err:          lastErr,
 					StatusCode:   statusCode,
-					RetryAfter:   retryAfterDelay,
+					RetryAfter:   nextRetryAfter,
 					TotalElapsed: time.Since(startTime),
 				})
 			}
@@ -500,13 +499,15 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				c.logger.Info("retrying request",
 					"method", req.Method,
 					"attempt", attempt+1,
-					"delay_ms", actualDelay.Milliseconds(),
+					"delay_ms", nextActualDelay.Milliseconds(),
 				)
 			}
 
 			// Wait for delay
+			timer := time.NewTimer(nextActualDelay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				// Context cancelled during wait
 				statusCode := 0
 				if resp != nil {
@@ -518,7 +519,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 					LastStatus: statusCode,
 					Elapsed:    time.Since(startTime),
 				}
-			case <-time.After(actualDelay):
+			case <-timer.C:
 				// Continue to attempt
 			}
 		}
@@ -575,11 +576,14 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				)
 			}
 
-			// Preview actual delay (for logging)
-			previewDelay, _ := c.applyDelayModifiers(nextDelayBase, resp)
+			// Apply Retry-After, jitter, and max cap
+			nextActualDelay, nextRetryAfter = c.applyDelayModifiers(nextDelayBase, resp)
 
 			// Record retry decision
-			retryReason := determineRetryReason(lastErr, resp)
+			var retryReason string
+			if c.metricsEnabled || c.loggerEnabled || c.tracerEnabled {
+				retryReason = determineRetryReason(lastErr, resp)
+			}
 			if c.metricsEnabled {
 				c.metrics.RecordRetry(req.Method, retryReason, attempt+1)
 			}
@@ -591,7 +595,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 					"url", req.URL.String(),
 					"attempt", attempt + 1,
 					"reason", retryReason,
-					"next_delay_ms", previewDelay.Milliseconds(),
+					"next_delay_ms", nextActualDelay.Milliseconds(),
 					"elapsed_ms", time.Since(startTime).Milliseconds(),
 				}
 
@@ -612,7 +616,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				requestSpan.AddEvent("retry",
 					Attribute{Key: "retry.attempt", Value: attempt + 1},
 					Attribute{Key: "retry.reason", Value: retryReason},
-					Attribute{Key: "retry.delay_ms", Value: previewDelay.Milliseconds()},
+					Attribute{Key: "retry.delay_ms", Value: nextActualDelay.Milliseconds()},
 				)
 			}
 

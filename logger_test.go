@@ -164,9 +164,9 @@ func TestClient_DefaultLogger(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Verify the default logger is slogAdapter (not nopLogger)
-	if _, ok := client.logger.(*slogAdapter); !ok {
-		t.Errorf("Expected default logger to be *slogAdapter, got %T", client.logger)
+	// Verify the default logger is SlogAdapter (not nopLogger)
+	if _, ok := client.logger.(*SlogAdapter); !ok {
+		t.Errorf("Expected default logger to be *SlogAdapter, got %T", client.logger)
 	}
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)

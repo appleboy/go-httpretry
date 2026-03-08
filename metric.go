@@ -35,30 +35,42 @@ func (nopMetricsCollector) RecordRequestComplete(string, int, time.Duration, int
 // defaultMetrics is the package-level singleton (internal use, not exported)
 var defaultMetrics = nopMetricsCollector{}
 
+// Retry reason constants for metrics and logging
+const (
+	RetryReasonTimeout     = "timeout"
+	RetryReasonCanceled    = "canceled"
+	RetryReasonNetworkErr  = "network_error"
+	RetryReasonRateLimited = "rate_limited"
+	RetryReason5xx         = "5xx"
+	RetryReason4xx         = "4xx"
+	RetryReasonUnknown     = "unknown"
+	RetryReasonOther       = "other"
+)
+
 // determineRetryReason categorizes the retry reason (for metrics and logging)
 func determineRetryReason(err error, resp *http.Response) string {
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return "timeout"
+			return RetryReasonTimeout
 		}
 		if errors.Is(err, context.Canceled) {
-			return "canceled"
+			return RetryReasonCanceled
 		}
-		return "network_error"
+		return RetryReasonNetworkErr
 	}
 
 	if resp == nil {
-		return "unknown"
+		return RetryReasonUnknown
 	}
 
 	switch {
 	case resp.StatusCode == 429:
-		return "rate_limited"
+		return RetryReasonRateLimited
 	case resp.StatusCode >= 500:
-		return "5xx"
+		return RetryReason5xx
 	case resp.StatusCode >= 400:
-		return "4xx"
+		return RetryReason4xx
 	default:
-		return "other"
+		return RetryReasonOther
 	}
 }
