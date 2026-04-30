@@ -35,7 +35,6 @@ func (nopMetricsCollector) RecordRequestComplete(string, int, time.Duration, int
 // defaultMetrics is the package-level singleton (internal use, not exported)
 var defaultMetrics = nopMetricsCollector{}
 
-// Retry reason constants for metrics and logging
 const (
 	RetryReasonTimeout     = "timeout"
 	RetryReasonCanceled    = "canceled"

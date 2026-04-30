@@ -376,7 +376,7 @@ func (c *Client) executeAttempt(
 	// Clone the request for retry (important: body might be consumed)
 	reqClone := req.Clone(attemptCtx)
 
-	//nolint:bodyclose // Response body is returned to caller who will close it
+	//nolint:bodyclose,gosec // Response body is returned to caller; URL is caller-provided (not SSRF)
 	resp, err := c.httpClient.Do(reqClone)
 	attemptDuration := time.Since(attemptStart)
 

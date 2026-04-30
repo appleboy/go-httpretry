@@ -2,12 +2,10 @@ package retry
 
 import "log/slog"
 
-// SlogAdapter adapts log/slog.Logger to the retry.Logger interface
 type SlogAdapter struct {
 	logger *slog.Logger
 }
 
-// NewSlogAdapter creates a slog adapter
 func NewSlogAdapter(logger *slog.Logger) *SlogAdapter {
 	return &SlogAdapter{logger: logger}
 }
