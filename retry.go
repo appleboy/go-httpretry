@@ -19,6 +19,14 @@ const (
 	defaultRetryDelayMultiple = 2.0
 )
 
+// Logging and span attribute keys.
+const (
+	attrHTTPMethod  = "http.method"
+	attrMethod      = "method"
+	attrURL         = "url"
+	attrNextDelayMs = "next_delay_ms"
+)
+
 // Middleware wraps an http.RoundTripper to add custom behavior per HTTP attempt.
 // Per-attempt middleware executes for EVERY HTTP call including retries.
 // Example use cases: per-attempt logging, request modification, distributed tracing spans.
@@ -360,7 +368,7 @@ func (c *Client) executeAttempt(
 	if c.tracerEnabled {
 		attemptCtx, attemptSpan = c.tracer.StartSpan(ctx, "http.retry.attempt",
 			Attribute{Key: "retry.attempt", Value: attempt + 1},
-			Attribute{Key: "http.method", Value: req.Method},
+			Attribute{Key: attrHTTPMethod, Value: req.Method},
 		)
 	} else {
 		// Return no-op span to maintain interface consistency
@@ -376,7 +384,7 @@ func (c *Client) executeAttempt(
 	// Clone the request for retry (important: body might be consumed)
 	reqClone := req.Clone(attemptCtx)
 
-	//nolint:bodyclose,gosec // Response body is returned to caller; URL is caller-provided (not SSRF)
+	//nolint:bodyclose // Response body is returned to caller
 	resp, err := c.httpClient.Do(reqClone)
 	attemptDuration := time.Since(attemptStart)
 
@@ -454,7 +462,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 	var requestSpan Span
 	if c.tracerEnabled {
 		ctx, requestSpan = c.tracer.StartSpan(ctx, "http.retry.request",
-			Attribute{Key: "http.method", Value: req.Method},
+			Attribute{Key: attrHTTPMethod, Value: req.Method},
 			Attribute{Key: "http.url", Value: req.URL.String()},
 			Attribute{Key: "retry.max_attempts", Value: c.maxRetries + 1},
 		)
@@ -464,8 +472,8 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 	// Log request start (conditional on loggerEnabled)
 	if c.loggerEnabled {
 		c.logger.Debug("starting request",
-			"method", req.Method,
-			"url", req.URL.String(),
+			attrMethod, req.Method,
+			attrURL, req.URL.String(),
 			"max_retries", c.maxRetries,
 		)
 	}
@@ -497,7 +505,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 			// Log retry attempt (conditional on loggerEnabled)
 			if c.loggerEnabled {
 				c.logger.Info("retrying request",
-					"method", req.Method,
+					attrMethod, req.Method,
 					"attempt", attempt+1,
 					"delay_ms", nextActualDelay.Milliseconds(),
 				)
@@ -545,7 +553,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 			}
 			if c.loggerEnabled {
 				c.logger.Debug("request completed",
-					"method", req.Method,
+					attrMethod, req.Method,
 					"attempts", attempt+1,
 					"duration", time.Since(startTime),
 				)
@@ -591,11 +599,11 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 			if c.loggerEnabled {
 				// Build base log fields
 				logFields := []any{
-					"method", req.Method,
-					"url", req.URL.String(),
+					attrMethod, req.Method,
+					attrURL, req.URL.String(),
 					"attempt", attempt + 1,
 					"reason", retryReason,
-					"next_delay_ms", nextActualDelay.Milliseconds(),
+					attrNextDelayMs, nextActualDelay.Milliseconds(),
 					"elapsed_ms", time.Since(startTime).Milliseconds(),
 				}
 
@@ -646,8 +654,8 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 	if c.loggerEnabled {
 		// Build base log fields
 		logFields := []any{
-			"method", req.Method,
-			"url", req.URL.String(),
+			attrMethod, req.Method,
+			attrURL, req.URL.String(),
 			"attempts", c.maxRetries + 1,
 			"duration_ms", totalDuration.Milliseconds(),
 			"final_status", statusCode,

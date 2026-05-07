@@ -45,8 +45,8 @@ func LoggingMiddleware(logger Logger) Middleware {
 			start := time.Now()
 
 			logger.Debug("http attempt starting",
-				"method", req.Method,
-				"url", req.URL.String(),
+				attrMethod, req.Method,
+				attrURL, req.URL.String(),
 			)
 
 			resp, err := next.RoundTrip(req)
@@ -54,15 +54,15 @@ func LoggingMiddleware(logger Logger) Middleware {
 
 			if err != nil {
 				logger.Warn("http attempt failed",
-					"method", req.Method,
-					"url", req.URL.String(),
+					attrMethod, req.Method,
+					attrURL, req.URL.String(),
 					"duration_ms", duration.Milliseconds(),
 					"error", err.Error(),
 				)
 			} else {
 				logger.Debug("http attempt completed",
-					"method", req.Method,
-					"url", req.URL.String(),
+					attrMethod, req.Method,
+					attrURL, req.URL.String(),
 					"status", resp.StatusCode,
 					"duration_ms", duration.Milliseconds(),
 				)
@@ -198,7 +198,7 @@ func TracingRequestMiddleware(tracer Tracer) RequestMiddleware {
 		return func(ctx context.Context, req *http.Request) (*http.Response, error) {
 			// Start request-level span
 			ctx, span := tracer.StartSpan(ctx, "http.request.with_retry",
-				Attribute{Key: "http.method", Value: req.Method},
+				Attribute{Key: attrHTTPMethod, Value: req.Method},
 				Attribute{Key: "http.url", Value: req.URL.String()},
 			)
 			defer span.End()
