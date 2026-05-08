@@ -1,6 +1,6 @@
 module example
 
-go 1.24
+go 1.25.10
 
 replace github.com/appleboy/go-httpretry => ../..
 

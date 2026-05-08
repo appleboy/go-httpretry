@@ -1,6 +1,6 @@
 module example
 
-go 1.25.3
+go 1.25.10
 
 require github.com/appleboy/go-httpretry v0.7.0
 
