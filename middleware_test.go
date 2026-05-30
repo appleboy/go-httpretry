@@ -724,14 +724,15 @@ func (s *middlewareTestSpan) SetAttributes(attrs ...Attribute)         {}
 func (s *middlewareTestSpan) SetStatus(status, message string)         {}
 func (s *middlewareTestSpan) AddEvent(name string, attrs ...Attribute) {}
 
-// TestLoggingMiddleware_NilResponseNoError is a regression test: a custom
-// RoundTripper may legally return (nil, nil). LoggingMiddleware must not panic
-// dereferencing resp.StatusCode on the success branch in that case.
+// TestLoggingMiddleware_NilResponseNoError is a regression test: a misbehaving
+// custom RoundTripper may return (nil, nil) even though that violates the
+// http.RoundTripper contract. LoggingMiddleware must not panic dereferencing
+// resp.StatusCode on the success branch in that case.
 func TestLoggingMiddleware_NilResponseNoError(t *testing.T) {
 	logger := &middlewareTestLogger{}
 	rt := LoggingMiddleware(logger)(RoundTripperFunc(
 		func(*http.Request) (*http.Response, error) {
-			return nil, nil // legal per http.RoundTripper; must not panic logging
+			return nil, nil // invalid per http.RoundTripper; must not panic logging
 		},
 	))
 

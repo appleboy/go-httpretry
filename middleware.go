@@ -60,7 +60,8 @@ func LoggingMiddleware(logger Logger) Middleware {
 					"error", err.Error(),
 				)
 			} else if resp != nil {
-				// A custom RoundTripper may legally return (nil, nil); guard the
+				// A misbehaving custom RoundTripper may return (nil, nil) even
+				// though that violates the http.RoundTripper contract; guard the
 				// resp.StatusCode access so logging never panics on that input.
 				logger.Debug("http attempt completed",
 					attrMethod, req.Method,

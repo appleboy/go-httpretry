@@ -275,10 +275,18 @@ func TestDetermineRetryReason(t *testing.T) {
 // that case (previously it was hard-coded to true on the non-retry branch).
 func TestMetrics_NonRetryableError_RecordsFailure(t *testing.T) {
 	mockMetrics := &MockMetricsCollector{}
+	// Inject a transport that always fails with a synthetic error so the
+	// non-retryable error path is exercised deterministically, without any real
+	// network I/O or DNS resolution.
 	client, err := NewClient(
 		WithMaxRetries(3),
 		WithJitter(false),
 		WithMetrics(mockMetrics),
+		WithHTTPClient(&http.Client{
+			Transport: RoundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("synthetic network error")
+			}),
+		}),
 		// Treat every error as non-retryable so the loop stops on the first error.
 		WithRetryableChecker(func(error, *http.Response) bool { return false }),
 	)
@@ -286,13 +294,8 @@ func TestMetrics_NonRetryableError_RecordsFailure(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	// .invalid is a reserved TLD (RFC 6761) that never resolves -> network error.
 	req, _ := http.NewRequestWithContext(
-		context.Background(),
-		http.MethodGet,
-		"http://go-httpretry-does-not-exist.invalid",
-		nil,
-	)
+		context.Background(), http.MethodGet, "http://example.test", nil)
 	resp, err := client.Do(req)
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
