@@ -234,6 +234,16 @@ func statusCodeOf(resp *http.Response) int {
 	return resp.StatusCode
 }
 
+// setSpanStatus records a span's terminal status from err: "error" with the
+// error message when err is non-nil, otherwise "ok".
+func setSpanStatus(span Span, err error) {
+	if err != nil {
+		span.SetStatus("error", err.Error())
+		return
+	}
+	span.SetStatus("ok", "")
+}
+
 // parseRetryAfter parses the Retry-After header and returns the duration to wait.
 // The Retry-After header can be either a number of seconds or an HTTP-date.
 // Returns 0 if the header is not present or cannot be parsed.
@@ -412,11 +422,7 @@ func (c *Client) executeAttempt(
 				Attribute{Key: "http.status_code", Value: resp.StatusCode},
 			)
 		}
-		if err != nil {
-			attemptSpan.SetStatus("error", err.Error())
-		} else {
-			attemptSpan.SetStatus("ok", "")
-		}
+		setSpanStatus(attemptSpan, err)
 	}
 
 	return attemptResult{
@@ -566,11 +572,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 			if c.tracerEnabled {
 				// Keep the span status consistent with the metrics success flag:
 				// a non-retryable error stops here but is still a failure.
-				if completedSuccessfully {
-					requestSpan.SetStatus("ok", "")
-				} else {
-					requestSpan.SetStatus("error", lastErr.Error())
-				}
+				setSpanStatus(requestSpan, lastErr)
 			}
 
 			// Wrap the response body to cancel the per-attempt context when the body is closed
