@@ -91,11 +91,13 @@ func LoggingMiddleware(logger Logger) Middleware {
 func HeaderMiddleware(headers map[string]string) Middleware {
 	return func(next http.RoundTripper) http.RoundTripper {
 		return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
-			// Clone request before modification (concurrent safety)
-			req = req.Clone(req.Context())
+			if len(headers) > 0 {
+				// Clone request before modification (concurrent safety)
+				req = req.Clone(req.Context())
 
-			for key, value := range headers {
-				req.Header.Set(key, value)
+				for key, value := range headers {
+					req.Header.Set(key, value)
+				}
 			}
 
 			return next.RoundTrip(req)
