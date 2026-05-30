@@ -857,6 +857,14 @@ func TestCombinedFeatures(t *testing.T) {
 		t.Errorf("expected first retry to have Retry-After=1s, got %v", retryInfos[0].RetryAfter)
 	}
 
+	// Even with jitter enabled, the actual delay must equal the server's
+	// Retry-After exactly (jitter must not shorten or lengthen it). This covers
+	// the jitter-ON + Retry-After path end-to-end through the public API.
+	if retryInfos[0].Delay != 1*time.Second {
+		t.Errorf("expected first retry delay to equal the 1s Retry-After (no jitter), got %v",
+			retryInfos[0].Delay)
+	}
+
 	// Second retry should not have Retry-After
 	if retryInfos[1].RetryAfter != 0 {
 		t.Errorf("expected second retry to have no Retry-After, got %v", retryInfos[1].RetryAfter)
