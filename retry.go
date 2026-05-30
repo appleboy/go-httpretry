@@ -564,7 +564,13 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				)
 			}
 			if c.tracerEnabled {
-				requestSpan.SetStatus("ok", "")
+				// Keep the span status consistent with the metrics success flag:
+				// a non-retryable error stops here but is still a failure.
+				if completedSuccessfully {
+					requestSpan.SetStatus("ok", "")
+				} else {
+					requestSpan.SetStatus("error", lastErr.Error())
+				}
 			}
 
 			// Wrap the response body to cancel the per-attempt context when the body is closed
