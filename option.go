@@ -266,16 +266,22 @@ func WithBody(contentType string, body io.Reader) RequestOption {
 			return
 		}
 
-		// Set both Body and GetBody to support request retries
-		req.Body = io.NopCloser(bytes.NewReader(data))
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(data)), nil
-		}
-		req.ContentLength = int64(len(data))
+		setBufferedBody(req, data, contentType)
+	}
+}
 
-		if contentType != "" {
-			req.Header.Set("Content-Type", contentType)
-		}
+// setBufferedBody buffers data as the request body and sets GetBody so the body
+// can be replayed on each retry. The Content-Type header is set only when
+// contentType is non-empty.
+func setBufferedBody(req *http.Request, data []byte, contentType string) {
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	req.ContentLength = int64(len(data))
+
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 }
 
@@ -320,13 +326,7 @@ func WithJSON(v any) RequestOption {
 			return
 		}
 
-		// Set both Body and GetBody to support request retries
-		req.Body = io.NopCloser(bytes.NewReader(data))
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(data)), nil
-		}
-		req.ContentLength = int64(len(data))
-		req.Header.Set("Content-Type", "application/json")
+		setBufferedBody(req, data, "application/json")
 	}
 }
 
