@@ -41,10 +41,12 @@ func WithMaxRetryDelay(d time.Duration) Option {
 	}
 }
 
-// WithRetryDelayMultiple sets the exponential backoff multiplier
+// WithRetryDelayMultiple sets the exponential backoff multiplier.
+// A multiplier of exactly 1.0 is allowed and yields a constant delay (no growth);
+// values below 1.0 are rejected because a shrinking backoff is almost never intended.
 func WithRetryDelayMultiple(multiplier float64) Option {
 	return func(c *Client) {
-		if multiplier > 1.0 {
+		if multiplier >= 1.0 {
 			c.retryDelayMultiple = multiplier
 		}
 	}
@@ -274,9 +276,19 @@ func WithBody(contentType string, body io.Reader) RequestOption {
 // can be replayed on each retry. The Content-Type header is set only when
 // contentType is non-empty.
 func setBufferedBody(req *http.Request, data []byte, contentType string) {
-	req.Body = io.NopCloser(bytes.NewReader(data))
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(data)), nil
+	if len(data) == 0 {
+		// Use http.NoBody for an empty payload. A non-nil reader with
+		// ContentLength == 0 makes net/http fall back to chunked transfer
+		// encoding (Request.outgoingLength reports -1 for a non-NoBody body),
+		// which some servers reject for POST/PUT. http.NoBody yields a clean
+		// "Content-Length: 0" instead.
+		req.Body = http.NoBody
+		req.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+	} else {
+		req.Body = io.NopCloser(bytes.NewReader(data))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
 	}
 	req.ContentLength = int64(len(data))
 

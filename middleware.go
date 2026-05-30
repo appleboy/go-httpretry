@@ -59,7 +59,9 @@ func LoggingMiddleware(logger Logger) Middleware {
 					"duration_ms", duration.Milliseconds(),
 					"error", err.Error(),
 				)
-			} else {
+			} else if resp != nil {
+				// A custom RoundTripper may legally return (nil, nil); guard the
+				// resp.StatusCode access so logging never panics on that input.
 				logger.Debug("http attempt completed",
 					attrMethod, req.Method,
 					attrURL, req.URL.String(),
