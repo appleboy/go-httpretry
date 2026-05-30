@@ -2535,41 +2535,59 @@ func TestWithBody_EmptyBody_NoChunkedEncoding(t *testing.T) {
 	}
 }
 
-// TestRespectRetryAfter_NotShortenedByJitter is a regression test: when jitter
-// is enabled, it must not be applied to a server-provided Retry-After value,
-// which would let the client retry sooner than the server explicitly asked.
-func TestRespectRetryAfter_NotShortenedByJitter(t *testing.T) {
-	var attempts atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if attempts.Add(1) == 1 {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
+// TestApplyDelayModifiers_RetryAfterNotJittered is a regression test: a
+// server-provided Retry-After must be returned unchanged even when jitter is
+// enabled, since jitter would otherwise shorten the wait below what the server
+// asked for. This asserts the exact delay deterministically — a timing-based
+// test could pass against the buggy code whenever jitter happened to lengthen
+// the delay (the old multiplier ranged 0.75x–1.25x).
+func TestApplyDelayModifiers_RetryAfterNotJittered(t *testing.T) {
 	client, err := NewClient(
-		WithMaxRetries(2),
-		WithJitter(true), // jitter ON must NOT shorten the server's Retry-After
+		WithJitter(true), // jitter ON must NOT touch the server's Retry-After
 		WithRespectRetryAfter(true),
-		WithInitialRetryDelay(50*time.Millisecond),
+		WithMaxRetryDelay(30*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
 
-	start := time.Now()
-	resp, err := client.Get(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer resp.Body.Close()
-	elapsed := time.Since(start)
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "5")
 
-	if elapsed < 1*time.Second {
-		t.Errorf("expected to wait at least the 1s Retry-After, waited only %v", elapsed)
+	// baseDelay is the exponential backoff value; Retry-After must take precedence
+	// and be returned exactly, with no jitter applied.
+	actual, retryAfter := client.applyDelayModifiers(2*time.Second, resp)
+
+	if retryAfter != 5*time.Second {
+		t.Errorf("expected parsed Retry-After 5s, got %v", retryAfter)
+	}
+	if actual != 5*time.Second {
+		t.Errorf("expected Retry-After 5s returned unchanged (no jitter), got %v", actual)
+	}
+}
+
+// TestApplyDelayModifiers_RetryAfterCapped documents that a Retry-After larger
+// than maxRetryDelay is still capped to maxRetryDelay as a safety bound.
+func TestApplyDelayModifiers_RetryAfterCapped(t *testing.T) {
+	client, err := NewClient(
+		WithJitter(true),
+		WithRespectRetryAfter(true),
+		WithMaxRetryDelay(10*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "30")
+
+	actual, retryAfter := client.applyDelayModifiers(1*time.Second, resp)
+
+	if retryAfter != 30*time.Second {
+		t.Errorf("expected parsed Retry-After 30s, got %v", retryAfter)
+	}
+	if actual != 10*time.Second {
+		t.Errorf("expected Retry-After capped to maxRetryDelay 10s, got %v", actual)
 	}
 }
 
