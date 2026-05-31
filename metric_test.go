@@ -268,3 +268,51 @@ func TestDetermineRetryReason(t *testing.T) {
 		})
 	}
 }
+
+// TestMetrics_NonRetryableError_RecordsFailure is a regression test: when a
+// custom RetryableChecker declines an error, the request stops with that error
+// returned to the caller. RecordRequestComplete must report success=false in
+// that case (previously it was hard-coded to true on the non-retry branch).
+func TestMetrics_NonRetryableError_RecordsFailure(t *testing.T) {
+	mockMetrics := &MockMetricsCollector{}
+	// Inject a transport that always fails with a synthetic error so the
+	// non-retryable error path is exercised deterministically, without any real
+	// network I/O or DNS resolution.
+	client, err := NewClient(
+		WithMaxRetries(3),
+		WithJitter(false),
+		WithMetrics(mockMetrics),
+		WithHTTPClient(&http.Client{
+			Transport: RoundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("synthetic network error")
+			}),
+		}),
+		// Treat every error as non-retryable so the loop stops on the first error.
+		WithRetryableChecker(func(error, *http.Response) bool { return false }),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(
+		context.Background(), http.MethodGet, "http://example.test", nil)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected a non-retryable network error to be returned")
+	}
+
+	if len(mockMetrics.RequestsComplete) != 1 {
+		t.Fatalf("expected 1 request-complete record, got %d", len(mockMetrics.RequestsComplete))
+	}
+	complete := mockMetrics.RequestsComplete[0]
+	if complete.Success {
+		t.Error("expected success=false when a non-retryable error is returned to the caller")
+	}
+	if complete.TotalAttempts != 1 {
+		t.Errorf("expected exactly 1 attempt (non-retryable, no retries), got %d",
+			complete.TotalAttempts)
+	}
+}

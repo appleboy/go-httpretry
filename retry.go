@@ -226,6 +226,24 @@ func DefaultRetryableChecker(err error, resp *http.Response) bool {
 	return statusCode >= 500 || statusCode == http.StatusTooManyRequests
 }
 
+// statusCodeOf returns the HTTP status code of resp, or 0 when resp is nil.
+func statusCodeOf(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+// setSpanStatus records a span's terminal status from err: "error" with the
+// error message when err is non-nil, otherwise "ok".
+func setSpanStatus(span Span, err error) {
+	if err != nil {
+		span.SetStatus("error", err.Error())
+		return
+	}
+	span.SetStatus("ok", "")
+}
+
 // parseRetryAfter parses the Retry-After header and returns the duration to wait.
 // The Retry-After header can be either a number of seconds or an HTTP-date.
 // Returns 0 if the header is not present or cannot be parsed.
@@ -291,13 +309,18 @@ func (c *Client) applyDelayModifiers(
 	// Check Retry-After header
 	if c.respectRetryAfter && resp != nil {
 		retryAfterDelay = parseRetryAfter(resp)
-		if retryAfterDelay > 0 {
-			actualDelay = retryAfterDelay
-		}
 	}
 
-	// Apply jitter
-	if c.jitterEnabled {
+	switch {
+	case retryAfterDelay > 0:
+		// Honor the server-provided Retry-After exactly. Jitter is intentionally
+		// NOT applied here: it would only shorten the wait below what the server
+		// explicitly asked for. Jitter exists to de-synchronize our own
+		// exponential backoff, not to override a server instruction. The max cap
+		// is still enforced below as a safety bound against absurd values.
+		actualDelay = retryAfterDelay
+	case c.jitterEnabled:
+		// Apply jitter to the exponential backoff delay to avoid thundering herd.
 		actualDelay = applyJitter(actualDelay)
 	}
 
@@ -349,7 +372,6 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 type attemptResult struct {
 	resp            *http.Response
 	err             error
-	statusCode      int
 	attemptDuration time.Duration
 	cancelAttempt   context.CancelFunc
 }
@@ -389,12 +411,8 @@ func (c *Client) executeAttempt(
 	attemptDuration := time.Since(attemptStart)
 
 	// Record metrics for this attempt (conditional on metricsEnabled)
-	statusCode := 0
-	if resp != nil {
-		statusCode = resp.StatusCode
-	}
 	if c.metricsEnabled {
-		c.metrics.RecordAttempt(req.Method, statusCode, attemptDuration, err)
+		c.metrics.RecordAttempt(req.Method, statusCodeOf(resp), attemptDuration, err)
 	}
 
 	// Update attempt span (conditional on tracerEnabled)
@@ -404,17 +422,12 @@ func (c *Client) executeAttempt(
 				Attribute{Key: "http.status_code", Value: resp.StatusCode},
 			)
 		}
-		if err != nil {
-			attemptSpan.SetStatus("error", err.Error())
-		} else {
-			attemptSpan.SetStatus("ok", "")
-		}
+		setSpanStatus(attemptSpan, err)
 	}
 
 	return attemptResult{
 		resp:            resp,
 		err:             err,
-		statusCode:      statusCode,
 		attemptDuration: attemptDuration,
 		cancelAttempt:   cancelAttempt,
 	}, attemptSpan
@@ -485,18 +498,16 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		// === PHASE 1: Wait for delay (if retrying) ===
-		if shouldWait && attempt > 0 {
+		// shouldWait is only ever set on a prior iteration that decided to retry,
+		// so it implies attempt > 0; no separate index check is needed.
+		if shouldWait {
 			// Call onRetry callback
 			if c.onRetryFunc != nil {
-				statusCode := 0
-				if resp != nil {
-					statusCode = resp.StatusCode
-				}
 				c.onRetryFunc(RetryInfo{
 					Attempt:      attempt,
 					Delay:        nextActualDelay,
 					Err:          lastErr,
-					StatusCode:   statusCode,
+					StatusCode:   statusCodeOf(resp),
 					RetryAfter:   nextRetryAfter,
 					TotalElapsed: time.Since(startTime),
 				})
@@ -517,14 +528,10 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 			case <-ctx.Done():
 				timer.Stop()
 				// Context cancelled during wait
-				statusCode := 0
-				if resp != nil {
-					statusCode = resp.StatusCode
-				}
 				return nil, &RetryError{
 					Attempts:   attempt,
 					LastErr:    ctx.Err(),
-					LastStatus: statusCode,
+					LastStatus: statusCodeOf(resp),
 					Elapsed:    time.Since(startTime),
 				}
 			case <-timer.C:
@@ -541,14 +548,18 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 
 		// === PHASE 3: Check if we should retry ===
 		if !c.retryableChecker(lastErr, resp) {
-			// Success or non-retryable error
+			// Success or non-retryable error. The request only "succeeded" when
+			// there is no error to return to the caller; a non-retryable error
+			// (e.g. a custom checker declining a network error) is a failure even
+			// though the retry loop stops here.
+			completedSuccessfully := lastErr == nil
 			if c.metricsEnabled {
 				c.metrics.RecordRequestComplete(
 					req.Method,
-					result.statusCode,
+					statusCodeOf(resp),
 					time.Since(startTime),
 					attempt+1,
-					true,
+					completedSuccessfully,
 				)
 			}
 			if c.loggerEnabled {
@@ -559,7 +570,9 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 				)
 			}
 			if c.tracerEnabled {
-				requestSpan.SetStatus("ok", "")
+				// Keep the span status consistent with the metrics success flag:
+				// a non-retryable error stops here but is still a failure.
+				setSpanStatus(requestSpan, lastErr)
 			}
 
 			// Wrap the response body to cancel the per-attempt context when the body is closed
@@ -645,10 +658,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *http.Request) (*http.Resp
 
 	// All retries exhausted
 	totalDuration := time.Since(startTime)
-	statusCode := 0
-	if resp != nil {
-		statusCode = resp.StatusCode
-	}
+	statusCode := statusCodeOf(resp)
 
 	// Log failure (conditional on loggerEnabled)
 	if c.loggerEnabled {

@@ -857,6 +857,14 @@ func TestCombinedFeatures(t *testing.T) {
 		t.Errorf("expected first retry to have Retry-After=1s, got %v", retryInfos[0].RetryAfter)
 	}
 
+	// Even with jitter enabled, the actual delay must equal the server's
+	// Retry-After exactly (jitter must not shorten or lengthen it). This covers
+	// the jitter-ON + Retry-After path end-to-end through the public API.
+	if retryInfos[0].Delay != 1*time.Second {
+		t.Errorf("expected first retry delay to equal the 1s Retry-After (no jitter), got %v",
+			retryInfos[0].Delay)
+	}
+
 	// Second retry should not have Retry-After
 	if retryInfos[1].RetryAfter != 0 {
 		t.Errorf("expected second retry to have no Retry-After, got %v", retryInfos[1].RetryAfter)
@@ -2492,5 +2500,123 @@ func TestWithJSON_WithOtherOptions(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+// TestWithBody_EmptyBody_NoChunkedEncoding is a regression test: an empty
+// payload must be sent with an explicit "Content-Length: 0" rather than chunked
+// transfer encoding. A non-nil body reader with ContentLength==0 makes net/http
+// fall back to chunked, which some servers reject for POST/PUT.
+func TestWithBody_EmptyBody_NoChunkedEncoding(t *testing.T) {
+	var gotContentLength int64
+	var gotTransferEncoding []string
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentLength = r.ContentLength
+		gotTransferEncoding = append([]string(nil), r.TransferEncoding...)
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(WithMaxRetries(0))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.Post(context.Background(), server.URL,
+		WithBody(contentTypeJSON, strings.NewReader("")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotContentLength != 0 {
+		t.Errorf("expected Content-Length 0, got %d", gotContentLength)
+	}
+	if len(gotTransferEncoding) != 0 {
+		t.Errorf("expected no chunked transfer encoding, got %v", gotTransferEncoding)
+	}
+	if gotBody != "" {
+		t.Errorf("expected empty body, got %q", gotBody)
+	}
+}
+
+// TestApplyDelayModifiers_RetryAfterNotJittered is a regression test: a
+// server-provided Retry-After must be returned unchanged even when jitter is
+// enabled, since jitter would otherwise shorten the wait below what the server
+// asked for. This asserts the exact delay deterministically — a timing-based
+// test could pass against the buggy code whenever jitter happened to lengthen
+// the delay (the old multiplier ranged 0.75x–1.25x).
+func TestApplyDelayModifiers_RetryAfterNotJittered(t *testing.T) {
+	client, err := NewClient(
+		WithJitter(true), // jitter ON must NOT touch the server's Retry-After
+		WithRespectRetryAfter(true),
+		WithMaxRetryDelay(30*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "5")
+
+	// baseDelay is the exponential backoff value; Retry-After must take precedence
+	// and be returned exactly, with no jitter applied.
+	actual, retryAfter := client.applyDelayModifiers(2*time.Second, resp)
+
+	if retryAfter != 5*time.Second {
+		t.Errorf("expected parsed Retry-After 5s, got %v", retryAfter)
+	}
+	if actual != 5*time.Second {
+		t.Errorf("expected Retry-After 5s returned unchanged (no jitter), got %v", actual)
+	}
+}
+
+// TestApplyDelayModifiers_RetryAfterCapped documents that a Retry-After larger
+// than maxRetryDelay is still capped to maxRetryDelay as a safety bound.
+func TestApplyDelayModifiers_RetryAfterCapped(t *testing.T) {
+	client, err := NewClient(
+		WithJitter(true),
+		WithRespectRetryAfter(true),
+		WithMaxRetryDelay(10*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", "30")
+
+	actual, retryAfter := client.applyDelayModifiers(1*time.Second, resp)
+
+	if retryAfter != 30*time.Second {
+		t.Errorf("expected parsed Retry-After 30s, got %v", retryAfter)
+	}
+	if actual != 10*time.Second {
+		t.Errorf("expected Retry-After capped to maxRetryDelay 10s, got %v", actual)
+	}
+}
+
+// TestWithRetryDelayMultiple_ConstantDelayAllowed is a regression test: a
+// multiplier of exactly 1.0 (constant delay) must be accepted, while values
+// below 1.0 are still rejected (keeping the default).
+func TestWithRetryDelayMultiple_ConstantDelayAllowed(t *testing.T) {
+	c, err := NewClient(WithRetryDelayMultiple(1.0))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if c.retryDelayMultiple != 1.0 {
+		t.Errorf("expected multiplier 1.0 to be accepted, got %v", c.retryDelayMultiple)
+	}
+
+	c2, err := NewClient(WithRetryDelayMultiple(0.5))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if c2.retryDelayMultiple != defaultRetryDelayMultiple {
+		t.Errorf("expected multiplier 0.5 to be rejected (default %v), got %v",
+			defaultRetryDelayMultiple, c2.retryDelayMultiple)
 	}
 }

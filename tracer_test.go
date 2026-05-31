@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -137,5 +138,51 @@ func TestClient_WithTracer(t *testing.T) {
 	// Verify retry events on request span
 	if len(requestSpan.Events) != 1 {
 		t.Errorf("Expected 1 retry event, got %d", len(requestSpan.Events))
+	}
+}
+
+// TestClient_WithTracer_NonRetryableError_SpanStatusError is a regression test:
+// when the retry loop stops on a non-retryable error, the request span status
+// must reflect the failure (consistent with the metrics success=false flag),
+// not be left marked "ok".
+func TestClient_WithTracer_NonRetryableError_SpanStatusError(t *testing.T) {
+	mockTracer := &MockTracer{}
+	// Synthetic failing transport keeps the test deterministic (no network I/O).
+	client, err := NewClient(
+		WithMaxRetries(3),
+		WithJitter(false),
+		WithTracer(mockTracer),
+		WithHTTPClient(&http.Client{
+			Transport: RoundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("synthetic network error")
+			}),
+		}),
+		// Treat the error as non-retryable so the loop stops on the first attempt.
+		WithRetryableChecker(func(error, *http.Response) bool { return false }),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	req, _ := http.NewRequestWithContext(
+		context.Background(), http.MethodGet, "http://example.test", nil)
+	resp, err := client.Do(req)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected a non-retryable error to be returned")
+	}
+
+	if len(mockTracer.Spans) == 0 {
+		t.Fatal("expected at least the request span to be created")
+	}
+	requestSpan := mockTracer.Spans[0]
+	if requestSpan.Name != "http.retry.request" {
+		t.Fatalf("expected request span 'http.retry.request', got %q", requestSpan.Name)
+	}
+	if requestSpan.Status != "error" {
+		t.Errorf("expected request span status 'error' on non-retryable error, got %q",
+			requestSpan.Status)
 	}
 }
