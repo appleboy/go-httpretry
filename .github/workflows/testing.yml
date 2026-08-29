@@ -17,9 +17,10 @@ jobs:
   lint:
     strategy:
       matrix:
+        go: [1.26, 1.27]
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} @ Go ${{ matrix.go }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -29,25 +30,26 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
           check-latest: true
 
       - name: Setup golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12
+          version: v2.13.2
           args: --verbose
 
   test:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+        go: [1.26, 1.27]
         include:
           - os: ubuntu-latest
             go-build: ~/.cache/go-build
           - os: macos-latest
             go-build: ~/Library/Caches/go-build
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} @ Go ${{ matrix.go }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Code
@@ -58,7 +60,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
           check-latest: true
 
       - uses: actions/cache@v6
@@ -66,7 +68,7 @@ jobs:
           path: |
             ${{ matrix.go-build }}
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
       - name: Run Tests
@@ -76,4 +78,4 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
-          flags: ${{ matrix.os }}
+          flags: ${{ matrix.os }},go-${{ matrix.go }}
