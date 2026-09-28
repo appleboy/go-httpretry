@@ -58,7 +58,7 @@ func (p *PrometheusCollector) RecordAttempt(
 	)
 }
 
-func (p *PrometheusCollector) RecordRetry(method string, reason string, attemptNumber int) {
+func (p *PrometheusCollector) RecordRetry(method, reason string, attemptNumber int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

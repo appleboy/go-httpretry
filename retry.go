@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -71,6 +72,8 @@ type RequestMiddleware func(RetryFunc) RetryFunc
 // RetryFunc represents the core retry operation: executing an HTTP request with retry logic.
 // It takes a context and request, and returns a response and error.
 // This type is used by RequestMiddleware to wrap the retry behavior.
+//
+//nolint:revive // Preserve the existing exported name for API compatibility.
 type RetryFunc func(context.Context, *http.Request) (*http.Response, error)
 
 // Client is an HTTP client with automatic retry logic using exponential backoff
@@ -106,6 +109,8 @@ type Client struct {
 type RetryableChecker func(err error, resp *http.Response) bool
 
 // RetryInfo contains information about a retry attempt
+//
+//nolint:revive // Preserve the existing exported name for API compatibility.
 type RetryInfo struct {
 	Attempt      int           // Current attempt number (1-indexed)
 	Delay        time.Duration // Delay before this retry
@@ -117,6 +122,8 @@ type RetryInfo struct {
 
 // RetryError is returned when all retry attempts have been exhausted.
 // It provides detailed information about the retry attempts and the final failure.
+//
+//nolint:revive // Preserve the existing exported name for API compatibility.
 type RetryError struct {
 	Attempts   int           // Total number of attempts made (initial + retries)
 	LastErr    error         // The last error that occurred (nil if last attempt had non-retryable status)
@@ -195,8 +202,8 @@ func NewClient(opts ...Option) (*Client, error) {
 
 		// Chain middleware from last to first (first middleware is outermost)
 		// Note: We wrap the Transport, not modify it - middleware pattern is non-invasive
-		for i := len(c.perAttemptMiddleware) - 1; i >= 0; i-- {
-			transport = c.perAttemptMiddleware[i](transport)
+		for _, v := range slices.Backward(c.perAttemptMiddleware) {
+			transport = v(transport)
 		}
 
 		// Shallow copy http.Client to avoid mutating user's client
@@ -457,8 +464,8 @@ func (c *Client) DoWithContext(ctx context.Context, req *http.Request) (*http.Re
 	retryFunc := c.doWithRetry
 
 	// Apply request-level middleware (from last to first)
-	for i := len(c.requestMiddleware) - 1; i >= 0; i-- {
-		retryFunc = c.requestMiddleware[i](retryFunc)
+	for _, v := range slices.Backward(c.requestMiddleware) {
+		retryFunc = v(retryFunc)
 	}
 
 	return retryFunc(ctx, req)

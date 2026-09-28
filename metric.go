@@ -13,7 +13,7 @@ type MetricsCollector interface {
 	RecordAttempt(method string, statusCode int, duration time.Duration, err error)
 
 	// RecordRetry records a retry event
-	RecordRetry(method string, reason string, attemptNumber int)
+	RecordRetry(method, reason string, attemptNumber int)
 
 	// RecordRequestComplete records request completion (including all retries)
 	RecordRequestComplete(
@@ -63,7 +63,7 @@ func determineRetryReason(err error, resp *http.Response) string {
 	}
 
 	switch {
-	case resp.StatusCode == 429:
+	case resp.StatusCode == http.StatusTooManyRequests:
 		return RetryReasonRateLimited
 	case resp.StatusCode >= 500:
 		return RetryReason5xx

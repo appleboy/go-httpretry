@@ -130,7 +130,7 @@ func (t *testMetricsCollector) RecordAttempt(
 	err error,
 ) {
 }
-func (t *testMetricsCollector) RecordRetry(method string, reason string, attemptNumber int) {}
+func (t *testMetricsCollector) RecordRetry(method, reason string, attemptNumber int) {}
 
 func (t *testMetricsCollector) RecordRequestComplete(
 	method string,
@@ -198,7 +198,7 @@ func TestClient_DoWithContext_TracerDisabled_RetryAndFailure(t *testing.T) {
 	// any unguarded tracer calls during retries or failure handling.
 	client.tracer = customTracer
 	client.tracerEnabled = false
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.DoWithContext(context.Background(), req)
 	_ = err // We don't assert on error as behavior may vary
 	// We ensure no panic and properly close the response body if present.

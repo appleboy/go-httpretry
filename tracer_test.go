@@ -39,7 +39,7 @@ func (s *MockSpan) SetAttributes(attrs ...Attribute) {
 	s.Attributes = append(s.Attributes, attrs...)
 }
 
-func (s *MockSpan) SetStatus(code string, description string) {
+func (s *MockSpan) SetStatus(code, description string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Status = code
@@ -165,7 +165,8 @@ func TestClient_WithTracer_NonRetryableError_SpanStatusError(t *testing.T) {
 	}
 
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "http://example.test", nil)
+		context.Background(), http.MethodGet, "http://example.test", nil,
+	)
 	resp, err := client.Do(req)
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()

@@ -82,7 +82,7 @@ func (s *OTelSpan) SetAttributes(attrs ...retry.Attribute) {
 	}
 }
 
-func (s *OTelSpan) SetStatus(code string, description string) {
+func (s *OTelSpan) SetStatus(code, description string) {
 	// In production:
 	// if code == "error" {
 	//     s.span.SetStatus(codes.Error, description)

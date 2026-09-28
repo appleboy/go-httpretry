@@ -12,7 +12,7 @@ type Attribute struct {
 type Span interface {
 	End()
 	SetAttributes(attrs ...Attribute)
-	SetStatus(code string, description string)
+	SetStatus(code, description string)
 	AddEvent(name string, attrs ...Attribute)
 }
 
