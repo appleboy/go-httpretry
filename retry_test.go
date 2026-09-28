@@ -288,8 +288,7 @@ func TestClient_Do_ExhaustedRetries(t *testing.T) {
 	}
 
 	// Verify error is a RetryError
-	var retryErr *RetryError
-	if !errors.As(err, &retryErr) {
+	if _, ok := errors.AsType[*RetryError](err); !ok {
 		t.Fatalf("expected RetryError, got %T: %v", err, err)
 	}
 
@@ -1487,8 +1486,7 @@ func TestClient_Do_ResponseBodyReadableAfterRetryExhaustion(t *testing.T) {
 	}
 
 	// Verify error is a RetryError
-	var retryErr *RetryError
-	if !errors.As(err, &retryErr) {
+	if _, ok := errors.AsType[*RetryError](err); !ok {
 		t.Fatalf("expected RetryError, got %T: %v", err, err)
 	}
 
