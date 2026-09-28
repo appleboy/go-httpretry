@@ -38,7 +38,7 @@ func (m *SimpleMetricsCollector) RecordAttempt(
 		method, statusCode, duration, err)
 }
 
-func (m *SimpleMetricsCollector) RecordRetry(method string, reason string, attemptNumber int) {
+func (m *SimpleMetricsCollector) RecordRetry(method, reason string, attemptNumber int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.totalRetries++
@@ -147,7 +147,7 @@ func (s *SimpleSpan) SetAttributes(attrs ...retry.Attribute) {
 	s.attributes = append(s.attributes, attrs...)
 }
 
-func (s *SimpleSpan) SetStatus(code string, description string) {
+func (s *SimpleSpan) SetStatus(code, description string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status = code

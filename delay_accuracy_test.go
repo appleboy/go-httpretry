@@ -189,7 +189,7 @@ func TestClient_RetryInfoDelayAccuracy(t *testing.T) {
 		t.Fatalf("expected 4 attempt times, got %d", len(attemptTimes))
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		actualDelay := attemptTimes[i+1].Sub(attemptTimes[i])
 		expectedDelay := expectedDelays[i]
 

@@ -58,7 +58,7 @@ func (m *MockMetricsCollector) RecordAttempt(
 	})
 }
 
-func (m *MockMetricsCollector) RecordRetry(method string, reason string, attemptNumber int) {
+func (m *MockMetricsCollector) RecordRetry(method, reason string, attemptNumber int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Retries = append(m.Retries, RetryRecord{
@@ -230,25 +230,25 @@ func TestDetermineRetryReason(t *testing.T) {
 		{
 			name:     "429 rate limited",
 			err:      nil,
-			resp:     &http.Response{StatusCode: 429},
+			resp:     &http.Response{StatusCode: http.StatusTooManyRequests},
 			expected: "rate_limited",
 		},
 		{
 			name:     "5xx error",
 			err:      nil,
-			resp:     &http.Response{StatusCode: 503},
+			resp:     &http.Response{StatusCode: http.StatusServiceUnavailable},
 			expected: "5xx",
 		},
 		{
 			name:     "4xx error",
 			err:      nil,
-			resp:     &http.Response{StatusCode: 404},
+			resp:     &http.Response{StatusCode: http.StatusNotFound},
 			expected: "4xx",
 		},
 		{
 			name:     "other",
 			err:      nil,
-			resp:     &http.Response{StatusCode: 200},
+			resp:     &http.Response{StatusCode: http.StatusOK},
 			expected: "other",
 		},
 		{
@@ -295,7 +295,8 @@ func TestMetrics_NonRetryableError_RecordsFailure(t *testing.T) {
 	}
 
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "http://example.test", nil)
+		context.Background(), http.MethodGet, "http://example.test", nil,
+	)
 	resp, err := client.Do(req)
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()

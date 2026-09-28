@@ -3,7 +3,6 @@ package retry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -14,11 +13,11 @@ import (
 
 // TestPerAttemptMiddlewareExecutionCount verifies per-attempt middleware runs N times for N attempts
 func TestPerAttemptMiddlewareExecutionCount(t *testing.T) {
-	var attemptCount int32
+	var attemptCount atomic.Int32
 
 	// Server that fails twice, then succeeds
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attemptCount, 1)
+		count := attemptCount.Add(1)
 		if count <= 2 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -45,7 +44,7 @@ func TestPerAttemptMiddlewareExecutionCount(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -65,11 +64,11 @@ func TestPerAttemptMiddlewareExecutionCount(t *testing.T) {
 
 // TestRequestMiddlewareExecutionCount verifies request-level middleware runs exactly once
 func TestRequestMiddlewareExecutionCount(t *testing.T) {
-	var attemptCount int32
+	var attemptCount atomic.Int32
 
 	// Server that fails twice, then succeeds
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attemptCount, 1)
+		count := attemptCount.Add(1)
 		if count <= 2 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -96,7 +95,7 @@ func TestRequestMiddlewareExecutionCount(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -158,7 +157,7 @@ func TestMiddlewareOrdering(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -227,7 +226,7 @@ func TestRequestMiddlewareOrdering(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -279,7 +278,7 @@ func TestMultipleMiddlewareWithOptions(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -327,7 +326,7 @@ func TestMiddlewareWithCustomHTTPClient(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -367,7 +366,7 @@ func TestRequestMiddlewareShortCircuit(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if resp != nil {
 		resp.Body.Close()
@@ -411,7 +410,7 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	ctx := context.WithValue(context.Background(), testKey, "test-value")
-	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -440,7 +439,7 @@ func TestLoggingMiddleware(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -475,7 +474,7 @@ func TestHeaderMiddleware(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -507,7 +506,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 
 	start := time.Now()
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -542,7 +541,7 @@ func TestCircuitBreakerMiddleware(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if resp != nil {
 		resp.Body.Close()
@@ -574,7 +573,7 @@ func TestTracingRequestMiddleware(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -589,9 +588,9 @@ func TestTracingRequestMiddleware(t *testing.T) {
 
 // TestCombinedMiddleware verifies both middleware levels work together
 func TestCombinedMiddleware(t *testing.T) {
-	var attemptCount int32
+	var attemptCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attemptCount, 1)
+		count := attemptCount.Add(1)
 		if count == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -626,7 +625,7 @@ func TestCombinedMiddleware(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), "GET", server.URL, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -684,24 +683,24 @@ func (r *testRateLimiter) Wait(ctx context.Context) error {
 type testCircuitBreaker struct {
 	open         bool
 	allowCalled  int32
-	successCount int32
-	failureCount int32
+	successCount atomic.Int32
+	failureCount atomic.Int32
 }
 
 func (cb *testCircuitBreaker) Allow() error {
 	atomic.AddInt32(&cb.allowCalled, 1)
 	if cb.open {
-		return fmt.Errorf("circuit breaker open")
+		return errors.New("circuit breaker open")
 	}
 	return nil
 }
 
 func (cb *testCircuitBreaker) RecordSuccess() {
-	atomic.AddInt32(&cb.successCount, 1)
+	cb.successCount.Add(1)
 }
 
 func (cb *testCircuitBreaker) RecordFailure() {
-	atomic.AddInt32(&cb.failureCount, 1)
+	cb.failureCount.Add(1)
 }
 
 type middlewareTestTracer struct {
@@ -732,12 +731,14 @@ func TestLoggingMiddleware_NilResponseNoError(t *testing.T) {
 	logger := &middlewareTestLogger{}
 	rt := LoggingMiddleware(logger)(RoundTripperFunc(
 		func(*http.Request) (*http.Response, error) {
-			return nil, nil // invalid per http.RoundTripper; must not panic logging
+			//nolint:nilnil // Deliberately violate the RoundTripper contract to verify logging does not panic.
+			return nil, nil
 		},
 	))
 
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "http://example.invalid", nil)
+		context.Background(), http.MethodGet, "http://example.invalid", nil,
+	)
 
 	//nolint:bodyclose // RoundTripper deliberately returns (nil, nil): no body to close
 	resp, err := rt.RoundTrip(req) // must not panic

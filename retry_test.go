@@ -785,7 +785,7 @@ func TestApplyJitter(t *testing.T) {
 
 	// Run multiple times to verify randomness
 	results := make(map[time.Duration]bool)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		jittered := applyJitter(delay)
 		results[jittered] = true
 
